@@ -120,7 +120,8 @@ static void pico8_apply_parity(lua_State *L)
     };
 
     /* Glyph/button constants; values are fixed-point readings taken from the
-       oracle with tostr(). Keys are exact UTF-8 byte sequences. */
+       oracle with tostr(). Names are written as UTF-8 and converted to
+       charset bytes at registration (see src/charset.cpp). */
     static const struct { const char *name; double value; } kGlyphGlobals[] = {
         { "\342\226\210", 0.5 },   /* █ U+2588 */
         { "\342\226\222", 23130.5 },   /* ▒ U+2592 */
@@ -182,7 +183,11 @@ static void pico8_apply_parity(lua_State *L)
 
     for (size_t i = 0; kGlyphGlobals[i].name; i++) {
         lua_pushnumber(L, (lua_Number)kGlyphGlobals[i].value);
-        lua_setglobal(L, kGlyphGlobals[i].name);
+        /* Cart text is charset bytes (see src/charset.cpp), so the names
+           register under the byte PICO-8 itself uses for each glyph. */
+        std::string name = pico8_charset_from_utf8(kGlyphGlobals[i].name,
+                                                   strlen(kGlyphGlobals[i].name));
+        lua_setglobal(L, name.c_str());
     }
 
     for (size_t i = 0; kRemovedGlobals[i]; i++)
@@ -217,13 +222,22 @@ void pico8_vm_destroy(void)
     }
 }
 
+/* Errors reach the host console as UTF-8 text, like every other string that
+   leaves the VM (see src/charset.cpp). */
+static std::string err_text(lua_State *L, int idx)
+{
+    size_t len = 0;
+    const char *s = lua_tolstring(L, idx, &len);
+    return s ? pico8_charset_to_utf8(s, len) : std::string();
+}
+
 int pico8_vm_load_buffer(const char *buf, size_t len, const char *name)
 {
     if (!L) return -1;
 
     int err = luaL_loadbuffer(L, buf, len, name);
     if (err) {
-        fprintf(stderr, "Lua load error: %s\n", lua_tostring(L, -1));
+        fprintf(stderr, "Lua load error: %s\n", err_text(L, -1).c_str());
         lua_pop(L, 1);
         return err;
     }
@@ -232,7 +246,7 @@ int pico8_vm_load_buffer(const char *buf, size_t len, const char *name)
     lua_insert(L, -2);
     err = lua_pcall(L, 0, 0, -2);
     if (err) {
-        fprintf(stderr, "Lua run error: %s\n", lua_tostring(L, -1));
+        fprintf(stderr, "Lua run error: %s\n", err_text(L, -1).c_str());
         lua_pop(L, 1);
         return err;
     }
@@ -261,7 +275,7 @@ static void call_function(const char *name)
     pico8_vm_push_traceback(L);
     lua_insert(L, -2);
     if (lua_pcall(L, 0, 0, -2) != LUA_OK) {
-        fprintf(stderr, "Error in %s: %s\n", name, lua_tostring(L, -1));
+        fprintf(stderr, "Error in %s: %s\n", name, err_text(L, -1).c_str());
         lua_pop(L, 1);
         return;
     }
@@ -330,6 +344,11 @@ static std::string console_tostring(lua_State *L, int idx)
 int pico8_vm_eval(const char *line)
 {
     if (!L || !line) return -1;
+
+    /* Console input is source text too: characters typed or pasted at the
+       shell become charset bytes here, the way cart source does. */
+    std::string line8 = pico8_charset_from_utf8(line, strlen(line));
+    line = line8.c_str();
 
     /* PICO-8's console first tries the line as a statement. Only if that does
        not compile does it re-try as an expression and echo the result -- which

@@ -67,6 +67,7 @@ static int pico8_dget(lua_State *L);
 static int pico8_dset(lua_State *L);
 static int pico8_assert(lua_State *L);
 static int pico8_sub(lua_State *L);
+static int pico8_ord(lua_State *L);
 static int pico8_reload(lua_State *L);
 static int pico8_cstore(lua_State *L);
 static int pico8_run(lua_State *L);
@@ -402,6 +403,21 @@ static int pico8_sspr(lua_State *L)
     return 0;
 }
 
+/*
+** Advance in pixels of one charset byte when printing, measured on the
+** oracle with print(chr(c)) for every c: ASCII and the small funny-font
+** glyphs (16..127) take 4px, everything from 128 up -- the wide graphics
+** glyphs, emoji, hiragana and katakana -- takes 8px, and the control codes
+** 0..15 don't move the cursor at all. Tab and newline are cursor moves and
+** are handled by the caller.
+*/
+static int print_advance(uint8_t c)
+{
+    if (c >= 128) return 8;
+    if (c >= 16)  return 4;
+    return 0;
+}
+
 static int pico8_print(lua_State *L)
 {
     const char *text = luaL_checkstring(L, 1);
@@ -411,7 +427,13 @@ static int pico8_print(lua_State *L)
        console scrollback rather than the (hidden) screen. */
     if (pico8_console_capturing()) {
         pico8_console_emit(text, 6);
-        lua_pushnumber(L, fix32_from_int((int)strlen(text) * 4));
+        int cx = 0;
+        for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
+            if (*p == '\n' || *p == '\r') { cx = 0; continue; }
+            if (*p == '\t') { cx = (cx / 16 + 1) * 16; continue; }
+            cx += print_advance(*p);
+        }
+        lua_pushnumber(L, fix32_from_int(cx));
         return 1;
     }
 
@@ -437,14 +459,15 @@ static int pico8_print(lua_State *L)
         switch (text[i]) {
             case '\t': cx = (cx / 16 + 1) * 16; continue;
             case '\n': cx = startx; cy += 6; continue;
-            case '\b': cx -= 4; continue;
             case '\r': cx = startx; continue;
             default: break;
         }
         int dx = cx, dy = cy;
         apply_camera(&dx, &dy);
+        /* Bytes from 128 up need a double-width glyph; until the font holds
+           those bitmaps the placeholder still advances the right distance. */
         pico8_draw_char(dx, dy, (uint8_t)text[i], col);
-        cx += 4;
+        cx += print_advance((uint8_t)text[i]);
     }
     if (narg < 2) {
         pico8_ram[0x5f26] = 0;
@@ -1552,7 +1575,13 @@ static int pico8_stat(lua_State *L)
 
 static int pico8_printh(lua_State *L)
 {
-    const char *msg = luaL_checkstring(L, 1);
+    size_t msglen = 0;
+    const char *msg_raw = luaL_checklstring(L, 1, &msglen);
+    /* Everything leaving the VM as text is transcoded to UTF-8 here, the way
+       the oracle does it: printh("한") prints "ムˇぬ" because those are the
+       glyphs for bytes 237,149,156. */
+    std::string msg_utf8 = pico8_charset_to_utf8(msg_raw, msglen);
+    const char *msg = msg_utf8.c_str();
     if (lua_gettop(L) >= 2 && !lua_isnil(L, 2)) {
         const char *filename = lua_tostring(L, 2);
         /* OVERWRITE defaults to false (append). SAVE_TO_DESKTOP redirects the
@@ -1742,6 +1771,40 @@ static int pico8_sub(lua_State *L)
     if (start > end) { lua_pushliteral(L, ""); return 1; }
     lua_pushlstring(L, s + start - 1, (size_t)(end - start + 1));
     return 1;
+}
+
+/*
+** ord(s, [i, [count]]) -- shadows z8lua's version, which returns no values
+** at all where PICO-8 returns nil. Measured on the oracle: a position past
+** the end (or before 1) yields nil, a non-string non-number argument yields
+** nil, a count below 1 yields nothing, and numbers are coerced to strings
+** (ord(5) is 53, the code of "5").
+*/
+static int pico8_ord(lua_State *L)
+{
+    size_t len;
+    int n = 0;
+    int count = 1;
+
+    int t = lua_type(L, 1);
+    if (t != LUA_TSTRING && t != LUA_TNUMBER) { lua_pushnil(L); return 1; }
+    const char *s = luaL_checklstring(L, 1, &len);
+
+    if (!lua_isnone(L, 3)) {
+        if (!lua_isnumber(L, 3)) return 0;
+        count = fix32_to_int(luaL_checkinteger(L, 3));
+    }
+    if (!lua_isnone(L, 2)) {
+        if (!lua_isnumber(L, 2)) { lua_pushnil(L); return 1; }
+        n = fix32_to_int(luaL_checkinteger(L, 2)) - 1;
+    }
+    if (count < 1) return 0;
+    if (n < 0 || size_t(n) >= len) { lua_pushnil(L); return 1; }
+    if (size_t(n) + size_t(count) > len) count = (int)len - n;
+    lua_checkstack(L, count);
+    for (int i = 0; i < count; i++)
+        lua_pushnumber(L, (lua_Number)(uint8_t)s[n + i]);
+    return count;
 }
 
 static int pico8_pack(lua_State *L)
@@ -1982,7 +2045,7 @@ static const luaL_Reg pico8_api[] = {
     {"sfx", pico8_sfx}, {"music", pico8_music},
     {"cartdata", pico8_cartdata}, {"dget", pico8_dget}, {"dset", pico8_dset},
     {"assert", pico8_assert},
-    {"sub", pico8_sub},
+    {"sub", pico8_sub}, {"ord", pico8_ord},
     {"stop", pico8_stop},
     {"reload", pico8_reload}, {"cstore", pico8_cstore},
     {"run", pico8_run}, {"reset", pico8_reset},    {"add", pico8_add},

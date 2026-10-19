@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include <string>
+
 #include "fix32.h"
 #include "lua.h"
 
@@ -177,6 +179,15 @@ int  pico8_audio_music_pattern(void);        /* stat(54), or -1 */
 int  pico8_audio_music_count(void);          /* stat(55) */
 int  pico8_audio_music_ticks(void);          /* stat(56), or -1 */
 int  pico8_audio_music_playing(void);        /* stat(57) */
+
+/* ------------------------------------------------------------------ *
+ *  Text charset
+ * ------------------------------------------------------------------ *
+ * PICO-8 keeps text as charset bytes (its own font's codes) and only
+ * turns it into UTF-8 at the edges: cart files and console output are
+ * UTF-8 text, everything inside the VM is bytes. See src/charset.cpp. */
+std::string pico8_charset_from_utf8(const char *src, size_t len);
+std::string pico8_charset_to_utf8(const char *src, size_t len);
 
 /* ------------------------------------------------------------------ *
  *  Console: boot splash + command shell

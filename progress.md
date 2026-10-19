@@ -115,22 +115,53 @@
 
 ## 3. TODO (다음 세션 시작 지점)
 
-### 3-1. 글리프 캐릭터셋 표현 패리티 (우선순위 높음, 상세는 §5)
+### 3-1. 글리프 캐릭터셋 표현 패리티 — [x] 완료 (2026-10-19, 상세는 §5)
 
-PICO-8은 글리프를 **단일 charset 바이트(128..153)**로 저장하는데 우리는
-UTF-8 원본을 유지해서 생기는 차이:
-- `#"⬅️"` → PICO-8: 1, 우리: 6 / `ord("⬅️",1)` → 139 vs 226
-- `cmp_globlist`의 글리프 **정렬 순서** 차이 (이름 집합은 일치 — 유일한 남은 테스트 차이)
-- 카트가 `\226\172...` 같은 raw 바이트를 조합해 출력하면 우리가 깨진 UTF-8을 씁니다
+PICO-8은 텍스트를 **charset 바이트**로 저장하고 경계에서만 UTF-8로 변환한다.
+우린 완전히 동일하게 구현 완료 — 회귀 배터리 32종 전부 MATCH
+(`cmp_charset`, `cmp_printwidth` 추가).
 
-구현 방향 (작업량 큼 → z8lua가 clone되는 외부 저장소라 Makefile 패치 단계 필요):
-1. z8lua 렉서 패치: 식별자 + 문자열 리터럴에서 PICO-8 글리프 코드포인트를
-   charset 바이트로 변환 (`\ddd` 이스케이프는 변환하지 않음 — 오라클 실측)
-2. 출력부(printh/콘솔/에러 메시지)에서 charset 바이트 → UTF-8 재변환
-3. 추가 조사 필요: 128..153 말고 다른 글리프(▶ ⇧ ⌫ 등)도 변환되는지,
-   `chr(139)`/`print()`/글자 그리기가 charset 코드를 어떻게 다루는지
+구현 (z8lua 패치 불필요했음 — `luai_ctype_` 테이블이 0x80..0xFF를 이미
+알파벳으로 표시하고 있어서 렉서가 글리프 식별자를 그대로 받음):
+1. `src/charset.cpp` + `src/charset_table.inc` (생성기 `tools/gen_charset.py`,
+   오라클 chr()/printh() 측정값 256항목):
+   - `pico8_charset_from_utf8()` — 로드 시: 알려진 UTF-8 글리프 시퀀스(157개,
+     longest-match) → 단일 바이트, 모르는 문자(`한`,`😀`)는 raw UTF-8 바이트 유지
+   - `pico8_charset_to_utf8()` — 출력/저장 시: 바이트 → UTF-8 글리프,
+     ASCII(9,10,13,32..126) 통과, **NUL에서 잘림** (printh의 C 문자열 시맨틱)
+2. `src/cart.cpp`: 두 로더 모두 소스를 `from_utf8` 변환 (`g_cart_source` =
+   내부 바이트, 포함 파일도 최종 텍스트에서 1회 변환), writer의 `__lua__`
+   섹션은 `to_utf8`로 재변환 → **cstore 출력 파일이 오라클과 바이트 동일**
+3. `src/api.cpp` `pico8_printh`: 콘솔/파일/클립보드 출력 전부 `to_utf8`
+4. `src/vm.cpp`: 에러 메시지(`err_text`) `to_utf8`, 콘솔 입력(`pico8_vm_eval`)
+   `from_utf8`, **글리프 상수 26개를 charset 바이트 이름으로 등록**
+   (UTF-8 이름 그대로 두면 카트의 바이트 식별자를 못 찾고 출력도 깨짐)
+5. `src/api.cpp` `pico8_ord` 신규 (z8lua版을 그림자): 오라클 시맨틱 —
+   범위 밖/비문자열 인자 → **nil 반환** (z8lua版은 값 0개), count<1 → 값 0개,
+   숫자는 문자열 강제변환(`ord(5)`=53)
+6. `print()` 폭: 바이트 128..255 = **8px**, 16..127 = 4px, 0..15 = 0px
+   (tab 16px, \n/\r 커서 이동 — 전부 `print(chr(c))` 실측)
+
+남은 차이 2건은 charset이 아니라 별도 항목:
+- [ ] **화면 글리프 렌더링**: `pico8_draw_char`는 ASCII 96글리프만 있음 —
+  128..255(및 funny fonts) 비트맵 추출 필요 (오라클 `screenshot()`로 추출 가능),
+  지금은 폭(advance)만 맞고 글리프는 placeholder
+- [ ] **런타임 에러 형식 패리티** (§3-2 참조): 오라클은 stdout에 4줄 형식
+  `runtime error line N tab T` / **소스줄(변환 안 된 charset 바이트)** /
+  메시지 / `at line N (tab T)` — 우린 Lua traceback. `cmp_glyphbytes` /
+  `cmp_glyphord`가 이 차이로만 DIFF (내용은 일치)
 
 ### 3-2. 작은 것들
+- [ ] **런타임 에러 형식** (§3-1 완료 시 측정):
+      오라클(0.2.7)은 카트 런타임 에러를 **stderr 없이 stdout**에 출력:
+      ```
+      runtime error line 24 tab 0
+      <소스줄 원문 — 변환 안 된 charset 바이트 (0x95 그대로, 깨진 UTF-8)>
+      attempt to compare number with string
+      at line 24 (tab 0)
+      ```
+      우리는 `Lua run error: [string ...]:N: msg` + Lua traceback.
+      로드(문법) 에러 형식은 아직 미측정.
 - [x] `src/cart.cpp`: 카트 헤더 버전 → **항상 43** (`kCartVersion`).
       근거: 오라클(0.2.7)은 불러온 카트의 버전(41)을 무시하고 cstore() 결과에
       항상 자기 버전 43을 씀. 또 우리 writer의 출력은 오라클 출력과
@@ -142,10 +173,13 @@ UTF-8 원본을 유지해서 생기는 차이:
 ### 3-3. 회귀 확인 방법
 - `./cmp.sh <cart.p8>` 한 개, `./cmp_all.sh <cart...>` 여러 개
   (둘 다 `/tmp/p8app` 사본을 오라클로 사용, `LC_ALL=C`로 바이트 비교)
+- 표준 배터리: `./cmp_all.sh $(ls cmp_*.p8 | grep -v "savegen\|savereload\|glyphbytes\|glyphord")`
+  → 현재 **32/32 MATCH**
 - `cmp_stat`은 `stat(84)`/`stat(94)`가 초 경계에서 1초 차이 나는 **플레이크**
   → 재실행 시 통과
-- `cmp_glyphbytes.p8` / `cmp_glyphord.p8`은 §5 조사용 카트 — 캐릭터셋
-  패리티가 끝나기 전까지는 DIFF가 정상
+- 제외 4종의 사유:
+  - `cmp_savegen` / `cmp_savereload`: `save()`는 `-x` 실행에서 PICO-8이 조용히 무시
+  - `cmp_glyphbytes` / `cmp_glyphord`: 내용은 일치, **에러 출력 형식**만 다름 (§3-2)
 
 ### 3-4. 이후 남은 로드맵
 - [ ] **토큰 카운트**: `API_CHECKLIST.md`의 `info()`가 token/compressed 수를 못 냄

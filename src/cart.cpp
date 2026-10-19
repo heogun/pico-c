@@ -456,10 +456,14 @@ static int load_p8png(const char *path)
     if (len <= 0) return -1;
     out[(size_t)len] = 0;
 
-    std::string code((char *)out.data(), (size_t)len);
-    std::string full = preprocess_includes(get_dir(path), code, 0);
+    std::string raw((char *)out.data(), (size_t)len);
+    std::string full = preprocess_includes(get_dir(path), raw, 0);
 
-    g_cart_source = code;
+    /* UTF-8 glyph text -> charset bytes, the way the oracle stores text
+       internally. Includes go through the same pass over the final text. */
+    full = pico8_charset_from_utf8(full.data(), full.size());
+
+    g_cart_source = pico8_charset_from_utf8(raw.data(), raw.size());
     g_cart_path = path ? path : "";
     cart_snapshot_rom();
 
@@ -478,17 +482,18 @@ static int load_p8_text(const char *path, const std::string &text)
     uint8_t cart_data[PICO8_CART_DATA_SIZE];
     memset(cart_data, 0, sizeof(cart_data));
 
-    std::string code;
-    parse_p8_text(text.data(), text.size(), cart_data, code);
+    std::string raw;
+    parse_p8_text(text.data(), text.size(), cart_data, raw);
 
     pico8_reset_memory();
     memcpy(pico8_ram, cart_data, PICO8_CART_DATA_SIZE);
 
-    g_cart_source = code;
+    g_cart_source = pico8_charset_from_utf8(raw.data(), raw.size());
     g_cart_path = path ? path : "";
     cart_snapshot_rom();
 
-    std::string full = preprocess_includes(get_dir(path), code, 0);
+    std::string full = preprocess_includes(get_dir(path), raw, 0);
+    full = pico8_charset_from_utf8(full.data(), full.size());
 
     if (pico8_vm_load_buffer(full.data(), full.size(), path) != 0)
         return -1;
@@ -607,7 +612,11 @@ static int cart_write_p8(const char *path, const uint8_t *d,
     out += "version ";
     out += std::to_string(version);
     out += "\n__lua__\n";
-    out += code;
+    /* The stored source is charset bytes; cart files are UTF-8 text, so
+       glyphs are re-encoded on the way out (as the oracle does -- unknown
+       characters survive a load/save roundtrip because their raw bytes
+       re-encode into the glyphs they spell). */
+    out += pico8_charset_to_utf8(code.data(), code.size());
     if (out.empty() || out.back() != '\n') out += '\n';
 
     /* __gfx__ : 128 rows of 128 hex digits, nibble pairs swapped. */

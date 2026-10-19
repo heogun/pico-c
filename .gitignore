@@ -30,3 +30,8 @@ test_*.p8
 dumpcart.c
 p8dtest.p8
 runtest.p8
+# files the regression carts write while running (cmp_extcmd, cmp_printh)
+guard.p8
+ptest.txt
+runtest2.txt
+tmp_*.p8
