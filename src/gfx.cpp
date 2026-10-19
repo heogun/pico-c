@@ -106,6 +106,10 @@ static const uint8_t pico8_font[96][8] = {
     {0x00,0x40,0xa0,0x40,0x00,0x00,0x00,0x00}
 };
 
+/* Bytes 1..31 and 128..255, measured from the oracle's screen RAM
+   (tools/gen_font.py). Wide glyphs are real 7x5 bitmaps, not scaled. */
+#include "font_table.inc"
+
 void pico8_draw_char(int x, int y, uint8_t ch, uint8_t color)
 {
     if (x >= PICO8_SCREEN_W || y >= PICO8_SCREEN_H) return;
@@ -115,16 +119,24 @@ void pico8_draw_char(int x, int y, uint8_t ch, uint8_t color)
     color = pico8_ram[PICO8_DRAW_STATE + (color & 0x0f)] & 0x0f;
 
     const uint8_t *glyph;
+    int cols = 4;
     if (ch >= 32 && ch <= 127) {
         glyph = pico8_font[ch - 32];
+    } else if (ch >= 128) {
+        glyph = pico8_font_wide[ch - 128];
+        cols = 8;
+    } else if (ch >= 16) {
+        glyph = pico8_font_small[ch - 16];
+    } else if (ch >= 1) {
+        glyph = pico8_font_ctrl[ch - 1];
     } else {
-        glyph = pico8_font[0];
+        return;                 /* code 0 ends the string: nothing to draw */
     }
 
     for (int row = 0; row < 6; row++) {
         if (y + row < 0 || y + row >= PICO8_SCREEN_H) continue;
         uint8_t bits = glyph[row];
-        for (int col = 0; col < 4; col++) {
+        for (int col = 0; col < cols; col++) {
             if (x + col < 0 || x + col >= PICO8_SCREEN_W) continue;
             if (bits & (1 << (7 - col))) {
                 int px = x + col;
