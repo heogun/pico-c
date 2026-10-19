@@ -101,6 +101,9 @@ void pico8_vm_push_traceback(lua_State *L);
 void pico8_register_api(lua_State *L);
 void pico8_pal_reset_all(void);
 void pico8_draw_char(int x, int y, uint8_t ch, uint8_t color);
+void pico8_draw_char_text(int x, int y, uint8_t ch,
+                          uint8_t fg, int has_bg, uint8_t bg,
+                          int invert, int wide, int tall, int pinball);
 void pico8_draw_char_scaled(int x, int y, uint8_t ch, uint8_t color, int scale);
 void pico8_clear_screen(uint8_t color);
 void pico8_put_pixel(int x, int y, uint8_t color);

@@ -151,6 +151,99 @@ void pico8_draw_char(int x, int y, uint8_t ch, uint8_t color)
     }
 }
 
+/*
+** One p8scii text cell, as print() draws it. Altogether the modes measured on
+** the oracle:
+**   - background colours fill a cell one pixel bigger than the glyph on the
+**     top/left and the right/bottom, i.e. (advance+1) by (6 glyph rows + 1);
+**   - \^w doubles the cell horizontally, \^t vertically (both for \^p);
+**   - in inverted mode the cell is filled with the foreground colour and the
+**     glyph itself is drawn in the background colour -- or left untouched
+**     when no background colour is set;
+**   - pinball mode spreads the glyph over a double-width/tall cell but keeps
+**     single pixels, offset by one pixel to the right.
+*/
+void pico8_draw_char_text(int x, int y, uint8_t ch,
+                          uint8_t fg, int has_bg, uint8_t bg,
+                          int invert, int wide, int tall, int pinball)
+{
+    const uint8_t *glyph;
+    int cols = 4;
+    if (ch >= 32 && ch <= 127) {
+        glyph = pico8_font[ch - 32];
+    } else if (ch >= 128) {
+        glyph = pico8_font_wide[ch - 128];
+        cols = 8;
+    } else if (ch >= 16) {
+        glyph = pico8_font_small[ch - 16];
+    } else if (ch >= 1) {
+        glyph = pico8_font_ctrl[ch - 1];
+        cols = 3;
+    } else {
+        return;
+    }
+
+    int sx = (wide || pinball) ? 2 : 1;
+    int sy = (tall || pinball) ? 2 : 1;
+
+    fg = pico8_ram[PICO8_DRAW_STATE + (fg & 0x0f)] & 0x0f;
+    bg = pico8_ram[PICO8_DRAW_STATE + (bg & 0x0f)] & 0x0f;
+
+    int glyph_w = cols * sx, glyph_h = 6 * sy;
+
+    /* Fill the cell, leaving the glyph's own ink positions alone so that
+       inverted text without a background colour keeps the screen showing
+       through the letter. */
+    if (has_bg || invert) {
+        uint8_t fill = invert ? fg : bg;
+        uint8_t ink = invert ? bg : fg;
+        int ink_on = !invert || has_bg;
+        for (int ry = -sy; ry < 6 * sy; ry++) {
+            for (int rx = -sx; rx < cols * sx; rx++) {
+                int gx = rx, gy = ry;
+                int covered = 0;
+                if (gx >= 0 && gy >= 0 && gx < glyph_w && gy < glyph_h) {
+                    int col = gx / sx, row = gy / sy;
+                    if (pinball) {
+                        col = (gx - 1) / 2;
+                        row = gy / 2;
+                        covered = (gx == 1 + col * 2) && (gy == row * 2);
+                    } else {
+                        covered = 1;
+                    }
+                    if (covered && (col < 0 || col >= cols ||
+                                    !(glyph[row] & (1 << (7 - col)))))
+                        covered = 0;
+                }
+                if (covered) {
+                    if (ink_on) pico8_put_pixel(x + rx, y + ry, ink);
+                } else {
+                    pico8_put_pixel(x + rx, y + ry, fill);
+                }
+            }
+        }
+    }
+
+    if (invert && !has_bg) return;      /* ink is the (transparent) screen */
+
+    uint8_t ink = invert ? bg : fg;
+    for (int row = 0; row < 6; row++) {
+        uint8_t bits = glyph[row];
+        if (!bits) continue;
+        for (int col = 0; col < cols; col++) {
+            if (!(bits & (1 << (7 - col)))) continue;
+            if (pinball) {
+                pico8_put_pixel(x + 1 + col * 2, y + row * 2, ink);
+            } else {
+                for (int ry = 0; ry < sy; ry++)
+                    for (int rx = 0; rx < sx; rx++)
+                        pico8_put_pixel(x + col * sx + rx, y + row * sy + ry,
+                                        ink);
+            }
+        }
+    }
+}
+
 void pico8_blit_char(uint8_t ch, int x, int y, uint8_t color)
 {
     pico8_draw_char(x, y, ch, color);

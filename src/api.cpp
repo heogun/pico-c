@@ -418,62 +418,219 @@ static int print_advance(uint8_t c)
     return 0;
 }
 
+/*
+** p8scii text state for one print() call. The control codes, measured on the
+** oracle:
+**   0       end of string
+**   1  \*   hex digit count, then the next byte repeated count times
+**   2  \#   hex digit background colour (invalid digit = black)
+**   3  \-   cursor x = x - 16 + hex digit (undocumented cursor op)
+**   4  \|   cursor y = y - 16 + hex digit (undocumented cursor op)
+**   5  \+   undocumented cursor op: takes one byte and ends the string
+**   6  \^   i/w/t/p modes ("-" prefix clears them), unknown letters ignored
+**   7  \a   beep: takes one byte and ends the string
+**   8  \b   backspace: cursor x -= 4
+**   9  \t   tab: cursor x up to the next multiple of 16
+**   10 \n   newline: x = print origin, y += 6
+**   11      undocumented: takes one byte and ends the string
+**   12 \f   hex digit foreground colour (invalid digit = black)
+**   13 \r   carriage return: x = print origin
+**   14      undocumented: takes one byte and ends the string
+**   15      draws the code's own glyph (4px) and eats one byte, if any
+*/
+typedef struct {
+    int cx, cy, startx;
+    uint8_t fg;
+    int has_bg;
+    uint8_t bg;
+    int invert, wide, tall, pinball;
+} print_state;
+
+static int hex_digit(uint8_t c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+/* Draw one glyph at the cursor and move past it. */
+static void print_emit(print_state *st, uint8_t c, int draw)
+{
+    if (draw) {
+        int dx = st->cx, dy = st->cy;
+        apply_camera(&dx, &dy);
+        pico8_draw_char_text(dx, dy, c, st->fg, st->has_bg, st->bg,
+                             st->invert, st->wide, st->tall, st->pinball);
+    }
+    int adv = print_advance(c);
+    if (st->wide || st->pinball) adv *= 2;
+    st->cx += adv;
+}
+
+/* Walk a p8scii string, updating the cursor and (when draw is set) painting
+   the screen. */
+static void print_walk(const char *text, print_state *st, int draw)
+{
+    for (int i = 0; text[i]; ) {
+        uint8_t c = (uint8_t)text[i];
+        switch (c) {
+        case '\b':
+            st->cx -= 4;
+            i++;
+            continue;
+        case '\t':
+            st->cx = (st->cx / 16 + 1) * 16;
+            i++;
+            continue;
+        case '\n':
+            st->cx = st->startx;
+            st->cy += 6;
+            i++;
+            continue;
+        case '\r':
+            st->cx = st->startx;
+            i++;
+            continue;
+        case 1: {                       /* \* repeat next byte */
+            uint8_t cnt = (uint8_t)text[i + 1];
+            if (!cnt) { i++; continue; }
+            uint8_t rep = (uint8_t)text[i + 2];
+            if (!rep) { i += 2; continue; }
+            if (rep < 16) {             /* repeated control: apply once */
+                i += 2;
+                continue;
+            }
+            int n = hex_digit(cnt);
+            if (n < 0) n = 0;
+            for (int k = 0; k < n; k++) print_emit(st, rep, draw);
+            i += 3;
+            continue;
+        }
+        case 2:                         /* \# background colour */
+        case 12: {                      /* \f foreground colour */
+            uint8_t arg = (uint8_t)text[i + 1];
+            if (!arg) { i++; continue; }
+            int v = hex_digit(arg);
+            if (v < 0) v = 0;
+            if (c == 2) {
+                st->bg = (uint8_t)v;
+                st->has_bg = 1;
+            } else {
+                st->fg = (uint8_t)v;
+            }
+            i += 2;
+            continue;
+        }
+        case 3: {                       /* \- cursor x op */
+            uint8_t arg = (uint8_t)text[i + 1];
+            if (!arg) { i++; continue; }
+            int v = hex_digit(arg);
+            st->cx = st->cx - 16 + (v < 0 ? 0 : v);
+            i += 2;
+            continue;
+        }
+        case 4: {                       /* \| cursor y op */
+            uint8_t arg = (uint8_t)text[i + 1];
+            if (!arg) { i++; continue; }
+            int v = hex_digit(arg);
+            st->cy = st->cy - 16 + (v < 0 ? 0 : v);
+            i += 2;
+            continue;
+        }
+        case 5:                         /* \+ undocumented */
+            i += 2;
+            return;
+        case 6: {                       /* \^ text modes */
+            uint8_t arg = (uint8_t)text[i + 1];
+            if (!arg) { i++; continue; }
+            int j = i + 1, off = 0;
+            if (text[j] == '-') {
+                off = 1;
+                j++;
+                if (!text[j]) { i = j; continue; }
+            }
+            switch (text[j]) {
+            case 'i': st->invert = !off; break;
+            case 'w': st->wide = !off; break;
+            case 't': st->tall = !off; break;
+            case 'p': st->pinball = !off; break;
+            default: break;
+            }
+            i = j + 1;
+            continue;
+        }
+        case 7:                         /* \a beep */
+        case 11:
+        case 14:
+            i += 2;
+            return;
+        case 15: {                      /* own control glyph, eats one byte */
+            if (!text[i + 1]) { i++; continue; }
+            if (draw) {
+                int dx = st->cx, dy = st->cy;
+                apply_camera(&dx, &dy);
+                pico8_draw_char_text(dx, dy, 15, st->fg, st->has_bg, st->bg,
+                                     st->invert, st->wide, st->tall,
+                                     st->pinball);
+            }
+            st->cx += (st->wide || st->pinball) ? 8 : 4;
+            i += 2;
+            continue;
+        }
+        default:
+            print_emit(st, c, draw);
+            i++;
+            continue;
+        }
+    }
+}
+
 static int pico8_print(lua_State *L)
 {
     const char *text = luaL_checkstring(L, 1);
     int narg = lua_gettop(L);
 
-    /* While the shell is evaluating a console line, print() output goes to the
-       console scrollback rather than the (hidden) screen. */
-    if (pico8_console_capturing()) {
-        pico8_console_emit(text, 6);
-        int cx = 0;
-        for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
-            if (*p == '\n' || *p == '\r') { cx = 0; continue; }
-            if (*p == '\t') { cx = (cx / 16 + 1) * 16; continue; }
-            cx += print_advance(*p);
-        }
-        lua_pushnumber(L, fix32_from_int(cx));
-        return 1;
-    }
+    print_state st;
+    st.fg = pico8_ram[0x5f25] & 0x0f;
+    st.has_bg = 0;
+    st.bg = 0;
+    st.invert = st.wide = st.tall = st.pinball = 0;
 
     int x = pico8_ram[0x5f26], y = pico8_ram[0x5f27];
-    uint8_t col = pico8_ram[0x5f25] & 0x0f;
 
     if (narg >= 4) {
         x = fix32_to_int(luaL_checknumber(L, 2));
         y = fix32_to_int(luaL_checknumber(L, 3));
-        col = fix32_to_uint8(luaL_checknumber(L, 4)) & 0x0f;
+        st.fg = fix32_to_uint8(luaL_checknumber(L, 4)) & 0x0f;
     } else if (narg >= 3) {
         x = fix32_to_int(luaL_checknumber(L, 2));
         y = fix32_to_int(luaL_checknumber(L, 3));
-    } else if (narg >= 2) {
-        x = fix32_to_int(luaL_checknumber(L, 2));
+    } else if (narg == 2) {
+        /* print(str, col): keep the cursor position, override the colour. */
+        st.fg = fix32_to_uint8(luaL_checknumber(L, 2)) & 0x0f;
     }
 
-    /* Logical (un-camera'd) cursor; camera is applied when drawing. */
-    int cx = x, cy = y;
-    const int startx = x;
+    st.cx = st.startx = x;
+    st.cy = y;
 
-    for (int i = 0; text[i]; i++) {
-        switch (text[i]) {
-            case '\t': cx = (cx / 16 + 1) * 16; continue;
-            case '\n': cx = startx; cy += 6; continue;
-            case '\r': cx = startx; continue;
-            default: break;
-        }
-        int dx = cx, dy = cy;
-        apply_camera(&dx, &dy);
-        /* Bytes from 128 up need a double-width glyph; until the font holds
-           those bitmaps the placeholder still advances the right distance. */
-        pico8_draw_char(dx, dy, (uint8_t)text[i], col);
-        cx += print_advance((uint8_t)text[i]);
+    /* While the shell is evaluating a console line, print() output goes to the
+       console scrollback rather than the (hidden) screen. */
+    if (pico8_console_capturing()) {
+        pico8_console_emit(text, 6);
+        print_state cst = st;
+        cst.cx = cst.startx = 0;
+        cst.cy = 0;
+        print_walk(text, &cst, 0);
+        lua_pushnumber(L, fix32_from_int(cst.cx));
+        return 1;
     }
-    if (narg < 2) {
-        pico8_ram[0x5f26] = 0;
-        pico8_ram[0x5f27] = (uint8_t)(y + 6);
-    }
-    lua_pushnumber(L, fix32_from_int(cx));
+
+    print_walk(text, &st, 1);
+
+    pico8_ram[0x5f25] = st.fg;
+    pico8_ram[0x5f26] = (uint8_t)st.startx;
+    pico8_ram[0x5f27] = (uint8_t)(st.cy + 6);
+    lua_pushnumber(L, fix32_from_int(st.cx));
     return 1;
 }
 
