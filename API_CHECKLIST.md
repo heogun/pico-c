@@ -14,7 +14,6 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] `ls(directory)` (basic filtered listing)
 - [x] `run(param_str)` (restarts the current cart with a new param string)
 - [x] `stop(message)`
-- [x] `resume`
 - [x] `assert(condition, message)` (raises a runtime error that stops the cart)
 - [x] `reboot`
 - [x] `reset()` (restores RAM 0x5f00..0x5f7f, per the manual)
@@ -134,7 +133,15 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 
 ## Macro/Meta
 - [ ] token/performance parity
-- [ ] hidden/global API parity (`_ENV`, `_exit`, `_mark_cpu`, etc.)
+- [x] hidden/global API parity — `pairs(_ENV)` now enumerates exactly the same
+      176 names as the oracle (`_pausemenu`, `__type`, `cocreate`/`coresume`/
+      `costatus`/`yield`, `inext`, `trace`/`mapdraw`/`_set_fps`/… stubs and the
+      26 glyph constants); stock Lua globals that PICO-8 lacks (`_G`, `_VERSION`,
+      `pcall`, `xpcall`, `error`, `tonumber`, `dofile`, `loadfile`,
+      `collectgarbage`, `string`, `table`, `coroutine`, `debug`) are removed.
+      Known remaining gap: PICO-8 stores glyph characters as single charset
+      bytes (codes 128..153) while pico-c keeps raw UTF-8, so `#"⬅️"` is 1 on
+      PICO-8 and 6 here, and string keys sort differently. See progress.md §5.
 
 ## Console (shell)
 - [x] command dispatch + history + tab completion

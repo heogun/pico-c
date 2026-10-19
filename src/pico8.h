@@ -91,6 +91,9 @@ void pico8_vm_call_update(void);
 void pico8_vm_call_draw(void);
 int  pico8_vm_call_menuitem(int index, int buttons);
 int  pico8_vm_has_function(const char *name);
+/* Push the C traceback handler used as the error handler when the host
+   calls into cart code (PICO-8 exposes no __traceback global). */
+void pico8_vm_push_traceback(lua_State *L);
 
 void pico8_register_api(lua_State *L);
 void pico8_pal_reset_all(void);

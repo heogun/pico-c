@@ -30,7 +30,6 @@ static int pico8_rectfill(lua_State *L);
 static int pico8_rrect(lua_State *L);
 static int pico8_rrectfill(lua_State *L);
 static int pico8_reboot(lua_State *L);
-static int pico8_resume(lua_State *L);
 static int pico8_info(lua_State *L);
 static int pico8_folder(lua_State *L);
 static int pico8_ls(lua_State *L);
@@ -967,12 +966,6 @@ static int pico8_time(lua_State *L)
     return 1;
 }
 
-static int pico8_seconds(lua_State *L)
-{
-    lua_pushnumber(L, fix32(double(pico8_frame_count) / 60.0));
-    return 1;
-}
-
 static int pico8_foreach(lua_State *L)
 {
     luaL_checktype(L, 1, LUA_TTABLE);
@@ -1035,12 +1028,6 @@ static int pico8_reboot(lua_State *L)
 {
     (void)L;
     pico8_vm_halted = 1;
-    return 0;
-}
-
-static int pico8_resume(lua_State *L)
-{
-    (void)L;
     return 0;
 }
 
@@ -1402,7 +1389,7 @@ int pico8_menuitem_invoke(lua_State *L, int index, int buttons)
     lua_rawgeti(L, LUA_REGISTRYINDEX, g_menu_ref[index]);
     if (!lua_isfunction(L, -1)) { lua_pop(L, 1); return 0; }
 
-    lua_getglobal(L, "__traceback");
+    pico8_vm_push_traceback(L);
     lua_insert(L, -2);
     lua_pushnumber(L, fix32_from_int(buttons));
     if (lua_pcall(L, 1, 1, -2) != LUA_OK) {
@@ -2004,12 +1991,11 @@ static const luaL_Reg pico8_api[] = {
     {"all", pico8_all}, {"serial", pico8_serial},
     {"pack", pico8_pack},
     {"t", pico8_time},
-    {"seconds", pico8_seconds},
     {"foreach", pico8_foreach},
     {"unpack", pico8_unpack},
     {"extcmd", pico8_extcmd},
     {"flip", pico8_flip},
-    {"reboot", pico8_reboot}, {"resume", pico8_resume},
+    {"reboot", pico8_reboot},
     {"info", pico8_info}, {"folder", pico8_folder},
     {"ls", pico8_ls},    {"menuitem", pico8_menuitem},
     {NULL, NULL}
