@@ -1,0 +1,32 @@
+# --- Build artifacts ---
+obj/
+obj_asan/
+build/
+macbuild/
+*.o
+*.a
+*.exe
+pico-c-asan
+dumpcart
+*.dSYM/
+
+# --- macOS ---
+.DS_Store
+
+# --- Dependencies (fetched/managed externally) ---
+# z8lua is cloned by `make` (see Makefile)
+z8lua/
+# Windows/MinGW SDL2 dev libraries (huge vendored dependency)
+SDL2_mgw/
+# Third-party test harness with its own repository
+picotestdriver/
+
+# --- Copyrighted sample cartridges ---
+test_carts/
+
+# --- Scratch / one-off experiment carts ---
+test_*.p8
+*.p8d
+dumpcart.c
+p8dtest.p8
+runtest.p8
