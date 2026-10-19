@@ -73,8 +73,11 @@ static bool read_whole_file(const char *path, std::string &out)
 static std::string g_cart_source;
 /* Path of the currently loaded cartridge. */
 static std::string g_cart_path;
-/* Value written to the "version N" header line. */
-static int         g_cart_version = 41;
+/* Cart format version written to the "version N" header line. Real PICO-8
+   always writes its own current version rather than the one it loaded: a
+   cstore() issued from a v41 cart produced a v43 file on the oracle (0.2.7),
+   and our writer output is byte-identical to the oracle's for that cart. */
+static const int   kCartVersion = 43;
 /* The cart's data area (0x0000..0x42ff) exactly as it was loaded from disk.
    reload() restores from this and cstore() updates it before saving. */
 static uint8_t     g_cart_rom[PICO8_CART_DATA_SIZE];
@@ -82,24 +85,6 @@ static uint8_t     g_cart_rom[PICO8_CART_DATA_SIZE];
 static void cart_snapshot_rom(void)
 {
     memcpy(g_cart_rom, pico8_ram, PICO8_CART_DATA_SIZE);
-}
-
-/* Read "version N" from a .p8 header, leaving the previous value on failure. */
-static void cart_parse_version(const char *text, size_t len)
-{
-    const char *p = text;
-    const char *end = text + len;
-    while (p < end) {
-        const char *nl = (const char *)memchr(p, '\n', (size_t)(end - p));
-        size_t linelen = nl ? (size_t)(nl - p) : (size_t)(end - p);
-        if (linelen >= 9 && strncmp(p, "version ", 8) == 0 &&
-            isdigit((unsigned char)p[8])) {
-            g_cart_version = atoi(p + 8);
-            return;
-        }
-        if (!nl) break;
-        p = nl + 1;
-    }
 }
 
 /* ------------------------------------------------------------------ *
@@ -476,7 +461,6 @@ static int load_p8png(const char *path)
 
     g_cart_source = code;
     g_cart_path = path ? path : "";
-    g_cart_version = 41;
     cart_snapshot_rom();
 
     if (pico8_vm_load_buffer(full.data(), full.size(), path) != 0)
@@ -502,7 +486,6 @@ static int load_p8_text(const char *path, const std::string &text)
 
     g_cart_source = code;
     g_cart_path = path ? path : "";
-    cart_parse_version(text.data(), text.size());
     cart_snapshot_rom();
 
     std::string full = preprocess_includes(get_dir(path), code, 0);
@@ -565,7 +548,6 @@ const char *pico8_cart_source(size_t *len)
 
 void pico8_cart_set_path(const char *path) { g_cart_path = path ? path : ""; }
 const char *pico8_cart_get_path(void)      { return g_cart_path.c_str(); }
-int pico8_cart_get_version(void)           { return g_cart_version; }
 const uint8_t *pico8_cart_rom(void)        { return g_cart_rom; }
 
 static void put_hex_byte(std::string &out, uint8_t b)
@@ -725,12 +707,12 @@ static int cart_write_p8(const char *path, const uint8_t *d,
 
 int pico8_cart_save_p8(const char *path)
 {
-    return cart_write_p8(path, pico8_ram, g_cart_source, g_cart_version);
+    return cart_write_p8(path, pico8_ram, g_cart_source, kCartVersion);
 }
 
 int pico8_cart_save_rom_p8(const char *path)
 {
-    return cart_write_p8(path, g_cart_rom, g_cart_source, g_cart_version);
+    return cart_write_p8(path, g_cart_rom, g_cart_source, kCartVersion);
 }
 
 /* Read just the data area of a cartridge (either .p8 or .p8.png) without
@@ -826,6 +808,6 @@ int pico8_cart_cstore(int dest, int source, int len, const char *filename)
     if (out.compare(out.size() - 4, 4, ".png") == 0)
         return len;   /* .p8.png writing is not supported yet */
 
-    cart_write_p8(out.c_str(), g_cart_rom, g_cart_source, g_cart_version);
+    cart_write_p8(out.c_str(), g_cart_rom, g_cart_source, kCartVersion);
     return len;
 }

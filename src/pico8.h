@@ -137,7 +137,6 @@ void        pico8_cart_set_source(const char *src, size_t len);
 const char *pico8_cart_source(size_t *len);
 void        pico8_cart_set_path(const char *path);
 const char *pico8_cart_get_path(void);
-int         pico8_cart_get_version(void);
 
 /* The cart's on-disk data area (0x0000..0x42ff), retained for reload(). */
 const uint8_t *pico8_cart_rom(void);

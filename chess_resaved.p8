@@ -1,5 +1,5 @@
 pico-8 cartridge // http://www.pico-8.com
-version 41
+version 43
 __lua__
 reload(0,0,0x4300,"chess.p8")
 save("chess_resaved.p8")
