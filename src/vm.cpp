@@ -31,14 +31,125 @@ static void *pico8_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
     return realloc(ptr, nsize);
 }
 
+/* ------------------------------------------------------------------ *
+ *  PICO-8 error reporting
+ *
+ *  The oracle prints cart errors to stdout as a small block (measured
+ *  2026-10-20 against PICO-8 0.2.7):
+ *
+ *    runtime error line 24 tab 0
+ *    printh("g1="..ord(g,1).." g2="..ord(g,2))   <- the source line
+ *    attempt to concatenate a nil value          <- the message
+ *    in inner line 2 (tab 0)                     <- one per Lua frame,
+ *    in outer line 5 (tab 0)                        innermost first
+ *    at line 7 (tab 0)                           <- outermost frame
+ *
+ *  A load failure prints the same block with "syntax error line 4 (tab 0)"
+ *  and no frames. When the engine itself calls the failing function there is
+ *  no main chunk frame and the last line is "at line 1 (tab 1)" under _init
+ *  and "at line 0 (tab 0)" under _draw/_update.
+ *
+ *  The source echo is not transcoded: the oracle emits the raw charset bytes
+ *  of the line (an identifier like ˇ comes out as byte 149).
+ * ------------------------------------------------------------------ */
+
+static std::string g_chunk_text;    /* text of the chunk being run */
+static int g_error_reported = 0;
+/* Name the host used to call into the cart (_init, _draw, ...). Lua cannot
+   name that outermost frame because the call comes from C. */
+static const char *g_entry_name = "";
+
+int pico8_vm_error_reported(void) { return g_error_reported; }
+
+/* Split "<chunk>:<line>: <message>" into its line number and message text. */
+static int error_position(const char *msg, std::string &text)
+{
+    text = msg ? msg : "";
+    if (!msg) return 0;
+    for (const char *p = msg; *p && *p != '\n'; p++) {
+        if (*p != ':' || p[1] < '0' || p[1] > '9') continue;
+        const char *q = p + 1;
+        while (*q >= '0' && *q <= '9') q++;
+        if (q[0] != ':' || q[1] != ' ') continue;
+        text.assign(q + 2);
+        return atoi(p + 1);
+    }
+    return 0;
+}
+
+/* The given 1-based line of the loaded chunk, verbatim. */
+static std::string chunk_line(int line)
+{
+    if (line < 1) return "";
+    size_t pos = 0;
+    for (int n = 1; n < line; n++) {
+        pos = g_chunk_text.find('\n', pos);
+        if (pos == std::string::npos) return "";
+        pos++;
+    }
+    size_t end = g_chunk_text.find('\n', pos);
+    if (end == std::string::npos) end = g_chunk_text.size();
+    return g_chunk_text.substr(pos, end - pos);
+}
+
+struct ErrorFrame {
+    char name[64];
+    int  line;
+    bool is_main;
+    bool named;
+};
+
+/* Build the whole runtime error block from the live call stack. */
+static std::string runtime_error_block(const char *msg)
+{
+    std::string text;
+    int line = error_position(msg, text);
+
+    ErrorFrame frames[32];
+    int nframes = 0;
+    for (int level = 1; nframes < 32; level++) {
+        lua_Debug ar;
+        if (!lua_getstack(L, level, &ar)) break;
+        if (!lua_getinfo(L, "lnS", &ar)) break;
+        if (ar.currentline < 0) continue;          /* C frame: not shown */
+        ErrorFrame &f = frames[nframes++];
+        snprintf(f.name, sizeof f.name, "%s",
+                 (ar.name && *ar.name) ? ar.name : "?");
+        f.named = (ar.name && *ar.name) != NULL;
+        f.line = ar.currentline;
+        f.is_main = ar.what && strcmp(ar.what, "main") == 0;
+    }
+    if (nframes > 0 && !frames[nframes - 1].named && *g_entry_name)
+        snprintf(frames[nframes - 1].name, sizeof frames[nframes - 1].name,
+                 "%s", g_entry_name);
+    if (line <= 0) line = (nframes > 0) ? frames[0].line : 0;
+
+    std::string out;
+    out += "runtime error line " + std::to_string(line) + " tab 0\n";
+    out += chunk_line(line) + "\n";
+    out += text + "\n";
+    for (int i = 0; i < nframes; i++) {
+        if (frames[i].is_main) {
+            out += "at line " + std::to_string(frames[i].line) + " (tab 0)\n";
+        } else {
+            out += "in ";
+            out += frames[i].name;
+            out += " line " + std::to_string(frames[i].line) + " (tab 0)\n";
+        }
+    }
+    if (nframes == 0 || !frames[nframes - 1].is_main) {
+        if (nframes > 0 && strcmp(frames[nframes - 1].name, "_init") == 0)
+            out += "at line 1 (tab 1)\n";
+        else
+            out += "at line 0 (tab 0)\n";
+    }
+    return out;
+}
+
 static int traceback(lua_State *L)
 {
-    const char *msg = lua_tostring(L, 1);
-    if (msg) {
-        luaL_traceback(L, L, msg, 1);
-    } else {
-        lua_pushliteral(L, "nil error");
-    }
+    std::string block = runtime_error_block(lua_tostring(L, 1));
+    lua_pushlstring(L, block.data(), block.size());
     return 1;
 }
 
@@ -222,22 +333,25 @@ void pico8_vm_destroy(void)
     }
 }
 
-/* Errors reach the host console as UTF-8 text, like every other string that
-   leaves the VM (see src/charset.cpp). */
-static std::string err_text(lua_State *L, int idx)
-{
-    size_t len = 0;
-    const char *s = lua_tolstring(L, idx, &len);
-    return s ? pico8_charset_to_utf8(s, len) : std::string();
-}
-
 int pico8_vm_load_buffer(const char *buf, size_t len, const char *name)
 {
     if (!L) return -1;
 
+    g_chunk_text.assign(buf, len);
+    g_error_reported = 0;
+    g_entry_name = "";
+
     int err = luaL_loadbuffer(L, buf, len, name);
     if (err) {
-        fprintf(stderr, "Lua load error: %s\n", err_text(L, -1).c_str());
+        std::string text;
+        int line = error_position(lua_tostring(L, -1), text);
+        std::string block;
+        block += "syntax error line " + std::to_string(line) + " (tab 0)\n";
+        block += chunk_line(line) + "\n";
+        block += text + "\n";
+        fputs(block.c_str(), stdout);
+        fflush(stdout);
+        g_error_reported = 1;
         lua_pop(L, 1);
         return err;
     }
@@ -246,7 +360,10 @@ int pico8_vm_load_buffer(const char *buf, size_t len, const char *name)
     lua_insert(L, -2);
     err = lua_pcall(L, 0, 0, -2);
     if (err) {
-        fprintf(stderr, "Lua run error: %s\n", err_text(L, -1).c_str());
+        const char *block = lua_tostring(L, -1);
+        if (block) fputs(block, stdout);
+        fflush(stdout);
+        g_error_reported = 1;
         lua_pop(L, 1);
         return err;
     }
@@ -272,10 +389,17 @@ static void call_function(const char *name)
         lua_pop(L, 1);
         return;
     }
+    g_entry_name = name;
     pico8_vm_push_traceback(L);
     lua_insert(L, -2);
     if (lua_pcall(L, 0, 0, -2) != LUA_OK) {
-        fprintf(stderr, "Error in %s: %s\n", name, err_text(L, -1).c_str());
+        const char *block = lua_tostring(L, -1);
+        if (block) fputs(block, stdout);
+        fflush(stdout);
+        g_error_reported = 1;
+        /* PICO-8 stops the cart when a frame callback fails: it prints the
+           error once, not on every frame. */
+        pico8_vm_halted = 1;
         lua_pop(L, 1);
         return;
     }

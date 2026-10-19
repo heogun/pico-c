@@ -366,7 +366,8 @@ static void main_loop(void)
                         pending_cart = NULL;
                         start_cart();
                     } else {
-                        fprintf(stderr, "Failed to load cart: %s\n", pending_cart);
+                        if (!pico8_vm_error_reported())
+                            fprintf(stderr, "Failed to load cart: %s\n", pending_cart);
                         pico8_console_print("failed to load cartridge");
                         pending_cart = NULL;
                         enter_shell();
@@ -449,7 +450,7 @@ int main(int argc, char *argv[])
             has_update60 = pico8_vm_has_function("_update60");
             if (has_init) pico8_vm_call_init();
             cart_loaded = 1;
-        } else {
+        } else if (!pico8_vm_error_reported()) {
             fprintf(stderr, "Failed to load cart: %s\n", cart_path);
         }
 

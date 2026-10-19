@@ -88,6 +88,7 @@ void pico8_render_screen(uint32_t *pixels, int pitch, int scale);
 int  pico8_vm_init(void);
 void pico8_vm_destroy(void);
 int  pico8_vm_load_buffer(const char *buf, size_t len, const char *name);
+int  pico8_vm_error_reported(void);
 void pico8_vm_call_init(void);
 void pico8_vm_call_update(void);
 void pico8_vm_call_draw(void);

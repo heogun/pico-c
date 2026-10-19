@@ -133,8 +133,8 @@ PICO-8은 텍스트를 **charset 바이트**로 저장하고 경계에서만 UTF
    내부 바이트, 포함 파일도 최종 텍스트에서 1회 변환), writer의 `__lua__`
    섹션은 `to_utf8`로 재변환 → **cstore 출력 파일이 오라클과 바이트 동일**
 3. `src/api.cpp` `pico8_printh`: 콘솔/파일/클립보드 출력 전부 `to_utf8`
-4. `src/vm.cpp`: 에러 메시지(`err_text`) `to_utf8`, 콘솔 입력(`pico8_vm_eval`)
-   `from_utf8`, **글리프 상수 26개를 charset 바이트 이름으로 등록**
+4. `src/vm.cpp`: 에러 블록(§3-2)은 원문 바이트 그대로 출력, 콘솔 입력
+   (`pico8_vm_eval`)은 `from_utf8`, **글리프 상수 26개를 charset 바이트 이름으로 등록**
    (UTF-8 이름 그대로 두면 카트의 바이트 식별자를 못 찾고 출력도 깨짐)
 5. `src/api.cpp` `pico8_ord` 신규 (z8lua版을 그림자): 오라클 시맨틱 —
    범위 밖/비문자열 인자 → **nil 반환** (z8lua版은 값 0개), count<1 → 값 0개,
@@ -142,26 +142,38 @@ PICO-8은 텍스트를 **charset 바이트**로 저장하고 경계에서만 UTF
 6. `print()` 폭: 바이트 128..255 = **8px**, 16..127 = 4px, 0..15 = 0px
    (tab 16px, \n/\r 커서 이동 — 전부 `print(chr(c))` 실측)
 
-남은 차이 2건은 charset이 아니라 별도 항목:
+남은 차이는 charset이 아니라 별도 항목:
 - [ ] **화면 글리프 렌더링**: `pico8_draw_char`는 ASCII 96글리프만 있음 —
   128..255(및 funny fonts) 비트맵 추출 필요 (오라클 `screenshot()`로 추출 가능),
   지금은 폭(advance)만 맞고 글리프는 placeholder
-- [ ] **런타임 에러 형식 패리티** (§3-2 참조): 오라클은 stdout에 4줄 형식
-  `runtime error line N tab T` / **소스줄(변환 안 된 charset 바이트)** /
-  메시지 / `at line N (tab T)` — 우린 Lua traceback. `cmp_glyphbytes` /
-  `cmp_glyphord`가 이 차이로만 DIFF (내용은 일치)
+- [x] **런타임 에러 형식 패리티** — 완료 (§3-2): stdout 4줄 블록(프레임 포함),
+  `cmp_glyphbytes`/`cmp_glyphord`도 이제 MATCH
 
 ### 3-2. 작은 것들
-- [ ] **런타임 에러 형식** (§3-1 완료 시 측정):
-      오라클(0.2.7)은 카트 런타임 에러를 **stderr 없이 stdout**에 출력:
+- [x] **런타임/문법 에러 출력 형식** — 완료 (2026-10-20)
+      오라클(0.2.7)은 카트 에러를 **stderr 없이 stdout**에 블록으로 출력:
       ```
       runtime error line 24 tab 0
       <소스줄 원문 — 변환 안 된 charset 바이트 (0x95 그대로, 깨진 UTF-8)>
       attempt to compare number with string
-      at line 24 (tab 0)
+      in inner line 2 (tab 0)          <- Lua 프레임마다, 안쪽부터
+      at line 7 (tab 0)                <- 가장 바깥 프레임(=메인 청크)
       ```
-      우리는 `Lua run error: [string ...]:N: msg` + Lua traceback.
-      로드(문법) 에러 형식은 아직 미측정.
+      문법 에러는 3줄 `syntax error line N (tab 0)` / 소스줄 / 메시지.
+      구현: `src/vm.cpp`의 `runtime_error_block()`(traceback 핸들러) + `error_position()`
+      + `chunk_line()`(로드한 청크 텍스트를 `g_chunk_text`에 보관), `pico8_vm_load_buffer`
+      및 `call_function`이 블록을 그대로 stdout에 씀. 세부 규칙(실측):
+      - 첫 줄은 `line <N> tab 0`, 이후 프레임도 `(tab 0)` — 깊은 들여쓰기(16칸/탭)도 0
+      - 엔진이 직접 호출한 함수는 메인 청크 프레임이 없어서 마지막 줄이
+        `_init`이면 **`at line 1 (tab 1)`**, `_draw`/`_update`/`_update60`이면
+        **`at line 0 (tab 0)`** (호출 이름은 `call_function`이 `g_entry_name`으로 전달)
+      - C 함수 프레임은 표시 안 함, `in <이름>`은 호출된 이름(`local f=inner; f()`도 `in f`)
+      - 프레임 콜백 에러 시 카트 **정지**(오라클은 에러를 프레임마다 반복 출력하지 않음)
+        → `pico8_vm_halted=1`
+      - 로드 실패 시 `main.cpp`의 `Failed to load cart`는 생략(`pico8_vm_error_reported()`)
+      - 남은 차이: **문법 에러의 메시지/위치**는 파서 의존(z8lua: `unexpected symbol near
+        '<eof>'` line 5 vs 오라클: `unclosed (` line 4) — 형식은 동일, 문구만 다름
+      회귀: `cmp_errorframe`, `cmp_errorinit`, `cmp_glyphord`, `cmp_glyphbytes` 추가 → 전부 MATCH.
 - [x] `src/cart.cpp`: 카트 헤더 버전 → **항상 43** (`kCartVersion`).
       근거: 오라클(0.2.7)은 불러온 카트의 버전(41)을 무시하고 cstore() 결과에
       항상 자기 버전 43을 씀. 또 우리 writer의 출력은 오라클 출력과
@@ -173,13 +185,14 @@ PICO-8은 텍스트를 **charset 바이트**로 저장하고 경계에서만 UTF
 ### 3-3. 회귀 확인 방법
 - `./cmp.sh <cart.p8>` 한 개, `./cmp_all.sh <cart...>` 여러 개
   (둘 다 `/tmp/p8app` 사본을 오라클로 사용, `LC_ALL=C`로 바이트 비교)
-- 표준 배터리: `./cmp_all.sh $(ls cmp_*.p8 | grep -v "savegen\|savereload\|glyphbytes\|glyphord")`
-  → 현재 **32/32 MATCH**
+- 표준 배터리: `./cmp_all.sh $(ls cmp_*.p8 | grep -v "savegen\|savereload")`
+  → 현재 **36/36 MATCH**
 - `cmp_stat`은 `stat(84)`/`stat(94)`가 초 경계에서 1초 차이 나는 **플레이크**
   → 재실행 시 통과
-- 제외 4종의 사유:
-  - `cmp_savegen` / `cmp_savereload`: `save()`는 `-x` 실행에서 PICO-8이 조용히 무시
-  - `cmp_glyphbytes` / `cmp_glyphord`: 내용은 일치, **에러 출력 형식**만 다름 (§3-2)
+- 제외 2종: `cmp_savegen` / `cmp_savereload` — `save()`는 `-x` 실행에서 PICO-8이
+  조용히 무시해서 파일 쓰기를 비교할 수 없음
+- `cmp_glyphord`의 글리프 전역 `pairs()` 순서는 **해시 순서(구현 정의)**라
+  카트에서 정렬한 뒤 비교한다 (집합 자체는 이전부터 일치).
 
 ### 3-4. 이후 남은 로드맵
 - [ ] **토큰 카운트**: `API_CHECKLIST.md`의 `info()`가 token/compressed 수를 못 냄
