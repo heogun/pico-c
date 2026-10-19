@@ -299,6 +299,34 @@ static void parse_music_line(const char *line, size_t len, uint8_t *dst)
     dst[3] = (uint8_t)(ch[3] | (mode    << 7));
 }
 
+/* ------------------------------------------------------------------ *
+ *  Cartridge size limits (matched against the oracle)
+ * ------------------------------------------------------------------ */
+
+/* PICO-8 checks the Lua source when a cart is loaded: more than 65536 bytes
+   and the load fails outright, more than 8192 tokens and the cart is loaded
+   but never run.  Returns -1 when the source is too large, 1 when it has too
+   many tokens (the message is printed here, exactly like the oracle) and 0
+   when the cart may run. */
+static int check_source_limits(const std::string &source)
+{
+    if (source.size() > PICO8_SOURCE_LIMIT)
+        return -1;
+
+    int tokens = pico8_count_tokens(source.data(), source.size());
+    if (tokens > PICO8_TOKEN_LIMIT) {
+        printf("program too large\n%d / %d tokens\n\n",
+               tokens, PICO8_TOKEN_LIMIT);
+        fflush(stdout);
+        return 1;
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------ *
+ *  .p8 text parsing
+ * ------------------------------------------------------------------ */
+
 /* Parse a complete .p8 text cart. Fills `cart_data` (a 0x4300 RAM image)
    and appends the Lua source to `code`. Returns 0 on success. */
 static int parse_p8_text(const char *text, size_t textlen,
@@ -316,34 +344,35 @@ static int parse_p8_text(const char *text, size_t textlen,
     size_t gfx_off = 0, map_off = 0, gff_off = 0;
     int sfx_i = 0, mus_i = 0;
 
-    char line[4096];
     size_t i = 0;
 
     while (i < textlen) {
         size_t nl = i;
         while (nl < textlen && text[nl] != '\n') nl++;
-        size_t raw_len = nl - i;
-        size_t len = raw_len < sizeof(line) - 1 ? raw_len : sizeof(line) - 1;
-        memcpy(line, text + i, len);
-        line[len] = 0;
-        while (len > 0 && (line[len - 1] == '\r' || line[len - 1] == '\n'))
-            line[--len] = 0;
+
+        /* Lines are kept whole: PICO-8 accepts lines longer than any fixed
+           buffer (a 65520-character comment line still loads). */
+        std::string line(text + i, nl - i);
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+            line.pop_back();
+        const char *l = line.c_str();
+        size_t len = line.size();
         i = (nl < textlen) ? nl + 1 : textlen;
 
-        if (line[0] == '_' && line[1] == '_') {
-            if      (!strncmp(line, "__lua__",   7)) section = SEC_LUA;
-            else if (!strncmp(line, "__gfx__",   7)) section = SEC_GFX;
-            else if (!strncmp(line, "__gff__",   7)) section = SEC_GFF;
-            else if (!strncmp(line, "__map__",   7)) section = SEC_MAP;
-            else if (!strncmp(line, "__sfx__",   7)) section = SEC_SFX;
-            else if (!strncmp(line, "__music__", 9)) section = SEC_MUSIC;
-            else if (!strncmp(line, "__label__", 9)) section = SEC_LABEL;
+        if (len >= 2 && l[0] == '_' && l[1] == '_') {
+            if      (!strncmp(l, "__lua__",   7)) section = SEC_LUA;
+            else if (!strncmp(l, "__gfx__",   7)) section = SEC_GFX;
+            else if (!strncmp(l, "__gff__",   7)) section = SEC_GFF;
+            else if (!strncmp(l, "__map__",   7)) section = SEC_MAP;
+            else if (!strncmp(l, "__sfx__",   7)) section = SEC_SFX;
+            else if (!strncmp(l, "__music__", 9)) section = SEC_MUSIC;
+            else if (!strncmp(l, "__label__", 9)) section = SEC_LABEL;
             else                                     section = SEC_NONE;
             continue;
         }
 
-        if (!strncmp(line, "pico-8 cartridge", 16)) continue;
-        if (!strncmp(line, "version ", 8)) continue;
+        if (!strncmp(l, "pico-8 cartridge", 16)) continue;
+        if (!strncmp(l, "version ", 8)) continue;
 
         switch (section) {
         case SEC_LUA:
@@ -355,42 +384,42 @@ static int parse_p8_text(const char *text, size_t textlen,
             /* Pairs of hex digits; the *second* digit is the high nibble
                (left pixel is stored in the low nibble). */
             for (size_t k = 0; k + 1 < len; k += 2) {
-                if (line[k] <= ' ' || line[k + 1] <= ' ') break;
+                if (l[k] <= ' ' || l[k + 1] <= ' ') break;
                 if (gfx_off >= 0x2000) break;
                 cart_data[PICO8_GFX_ADDR + gfx_off++] =
-                    (uint8_t)(hex_digit((unsigned char)line[k + 1]) * 16 +
-                              hex_digit((unsigned char)line[k]));
+                    (uint8_t)(hex_digit((unsigned char)l[k + 1]) * 16 +
+                              hex_digit((unsigned char)l[k]));
             }
             break;
 
         case SEC_GFF:
             for (size_t k = 0; k + 1 < len; k += 2) {
-                if (line[k] <= ' ' || line[k + 1] <= ' ') break;
+                if (l[k] <= ' ' || l[k + 1] <= ' ') break;
                 if (gff_off >= 0x100) break;
                 cart_data[PICO8_GFX_FLAGS + gff_off++] =
-                    (uint8_t)hex_pair(line, len, k);
+                    (uint8_t)hex_pair(l, len, k);
             }
             break;
 
         case SEC_MAP:
             for (size_t k = 0; k + 1 < len; k += 2) {
-                if (line[k] <= ' ' || line[k + 1] <= ' ') break;
+                if (l[k] <= ' ' || l[k + 1] <= ' ') break;
                 if (map_off >= 0x1000) break;
                 cart_data[PICO8_MAP_ADDR + map_off++] =
-                    (uint8_t)hex_pair(line, len, k);
+                    (uint8_t)hex_pair(l, len, k);
             }
             break;
 
         case SEC_SFX:
             if (sfx_i < 64)
-                parse_sfx_line(line, len,
+                parse_sfx_line(l, len,
                                cart_data + PICO8_SFX_ADDR + sfx_i * CART_SFX_SIZE);
             sfx_i++;
             break;
 
         case SEC_MUSIC:
             if (mus_i < 64)
-                parse_music_line(line, len,
+                parse_music_line(l, len,
                                  cart_data + PICO8_SONG_ADDR + mus_i * CART_SONG_SIZE);
             mus_i++;
             break;
@@ -467,6 +496,10 @@ static int load_p8png(const char *path)
     g_cart_path = path ? path : "";
     cart_snapshot_rom();
 
+    int limit = check_source_limits(full);
+    if (limit < 0) return -1;               /* caller reports the failure */
+    if (limit > 0) return 0;                /* loaded, but never run */
+
     if (pico8_vm_load_buffer(full.data(), full.size(), path) != 0)
         return -1;
 
@@ -476,7 +509,6 @@ static int load_p8png(const char *path)
 /* ------------------------------------------------------------------ *
  *  Public entry points
  * ------------------------------------------------------------------ */
-
 static int load_p8_text(const char *path, const std::string &text)
 {
     uint8_t cart_data[PICO8_CART_DATA_SIZE];
@@ -494,6 +526,10 @@ static int load_p8_text(const char *path, const std::string &text)
 
     std::string full = preprocess_includes(get_dir(path), raw, 0);
     full = pico8_charset_from_utf8(full.data(), full.size());
+
+    int limit = check_source_limits(full);
+    if (limit < 0) return -1;               /* caller reports the failure */
+    if (limit > 0) return 0;                /* loaded, but never run */
 
     if (pico8_vm_load_buffer(full.data(), full.size(), path) != 0)
         return -1;

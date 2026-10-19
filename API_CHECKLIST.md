@@ -18,7 +18,12 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] `reboot`
 - [x] `reset()` (restores RAM 0x5f00..0x5f7f, per the manual)
 - [x] `info()` (prints chars/lines to the console and returns nil, like PICO-8;
-      token/compressed counts require a tokenizer and are omitted)
+      headless `-x` does not capture that console output, so the token count is
+      verified through the 8192-token load limit instead — see progress.md §3-4)
+- [x] `__lua__` load limits: over 65536 bytes → `could not load <path>`; over
+      8192 tokens → `program too large` + `N / 8192 tokens` and the cart is
+      loaded but never run (`src/tokens.cpp`, `check_source_limits()` in
+      `src/cart.cpp`)
 - [x] `flip()`
 - [x] `printh(str, filename, overwrite, save_to_desktop)` (default appends,
       `overwrite` truncates, `"@clip"` copies to the host clipboard, and
@@ -132,7 +137,9 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] Keyboard: `stat(30)` keypress available, `stat(31)` character string
 
 ## Macro/Meta
-- [ ] token/performance parity
+- [x] token parity — the 8192-token limit, the 65536-byte source limit and both
+      messages match the oracle byte for byte (progress.md §3-4)
+- [ ] performance parity (fixed-point maths speed, profiling)
 - [x] hidden/global API parity — `pairs(_ENV)` now enumerates exactly the same
       176 names as the oracle (`_pausemenu`, `__type`, `cocreate`/`coresume`/
       `costatus`/`yield`, `inext`, `trace`/`mapdraw`/`_set_fps`/… stubs and the

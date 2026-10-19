@@ -366,8 +366,10 @@ static void main_loop(void)
                         pending_cart = NULL;
                         start_cart();
                     } else {
-                        if (!pico8_vm_error_reported())
-                            fprintf(stderr, "Failed to load cart: %s\n", pending_cart);
+                        if (!pico8_vm_error_reported()) {
+                            printf("could not load %s\n", pending_cart);
+                            fflush(stdout);
+                        }
                         pico8_console_print("failed to load cartridge");
                         pending_cart = NULL;
                         enter_shell();
@@ -451,7 +453,10 @@ int main(int argc, char *argv[])
             if (has_init) pico8_vm_call_init();
             cart_loaded = 1;
         } else if (!pico8_vm_error_reported()) {
-            fprintf(stderr, "Failed to load cart: %s\n", cart_path);
+            /* Same wording as the oracle, for a missing file just as much as
+               for a cart whose Lua section is over the source limit. */
+            printf("could not load %s\n", cart_path);
+            fflush(stdout);
         }
 
         int frame_limit = 7200;

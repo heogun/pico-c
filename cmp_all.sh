@@ -11,7 +11,9 @@ run() {
   ( /tmp/p8app/Contents/MacOS/pico8 -x "$PWD/$cart" > "$oracle" 2>&1 & )
   sleep 6
   pkill -f p8app
-  ./pico-c.exe -headless "$cart" > "$ours" 2>&1
+  # Both sides get the same absolute path: the oracle prints it verbatim in
+  # messages such as "could not load <path>".
+  ./pico-c.exe -headless "$PWD/$cart" > "$ours" 2>&1
   if diff <(grep -v '^RUNNING' "$oracle" | sed '/^$/d') \
           <(grep -v '^DEBUG' "$ours" | sed '/^$/d') > /tmp/cmp.diff; then
     echo "MATCH: $cart"; pass=$((pass+1))

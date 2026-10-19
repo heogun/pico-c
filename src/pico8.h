@@ -39,6 +39,13 @@ using z8::fix32;
 
 #define PICO8_CART_DATA_SIZE  0x4300
 
+/* Cart limits the oracle enforces when a cart is loaded.  A Lua section
+   longer than PICO8_SOURCE_LIMIT bytes is rejected outright ("could not
+   load"), and a cart with more than PICO8_TOKEN_LIMIT tokens is loaded but
+   never run ("program too large"). */
+#define PICO8_SOURCE_LIMIT    0x10000   /* 65536 bytes */
+#define PICO8_TOKEN_LIMIT     8192
+
 extern uint8_t pico8_ram[PICO8_RAM_SIZE];
 
 static inline int32_t fix32_to_int(fix32 x)    { return (int32_t)x; }
@@ -141,6 +148,10 @@ int  pico8_run_cart(const char *path);
 /* Raw Lua source of the currently loaded cart (preserved by save()). */
 void        pico8_cart_set_source(const char *src, size_t len);
 const char *pico8_cart_source(size_t *len);
+
+/* Number of PICO-8 tokens in a Lua source buffer, matching the count the
+   oracle reports when a cart exceeds the 8192-token limit. */
+int         pico8_count_tokens(const char *src, size_t len);
 void        pico8_cart_set_path(const char *path);
 const char *pico8_cart_get_path(void);
 
