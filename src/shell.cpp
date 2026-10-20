@@ -824,6 +824,85 @@ static void complete_input(void)
 /*  Input                                                              */
 /* ------------------------------------------------------------------ */
 
+static void cmd_edit(const std::string &arg)
+{
+    (void)arg;
+    if (!g_has_cart) {
+        print_error("edit: no cartridge loaded");
+        return;
+    }
+
+    const char *editor = getenv("EDITOR");
+    if (!editor || !editor[0]) editor = "vi";
+
+    std::string path = g_cart_path;
+    if (path.empty()) {
+        path = g_cart_name.empty() ? "edit.p8" : g_cart_name;
+        if (!has_suffix(path, ".p8") && !has_suffix(path, ".png"))
+            path += ".p8";
+    }
+
+    if (!g_source.empty()) {
+        FILE *f = fopen(path.c_str(), "wb");
+        if (f) {
+            fwrite(g_source.data(), 1, g_source.size(), f);
+            fclose(f);
+        }
+    } else if (pico8_cart_save_p8(path.c_str()) != 0) {
+        print_error("edit: cannot write " + path);
+        return;
+    }
+
+    std::string cmd = editor;
+    cmd += " \"";
+    cmd += path;
+    cmd += "\"";
+    int rc = system(cmd.c_str());
+    if (rc != 0) {
+        print_error("edit: editor returned non-zero exit code");
+        return;
+    }
+
+    if (pico8_console_load(path.c_str()) == 0) {
+        print_info("reloaded " + g_cart_name);
+    } else {
+        print_error("edit: failed to reload " + path);
+    }
+}
+
+static void cmd_keyconfig(void)
+{
+    print_info("keyconfig");
+    print("button mapping is not persisted in this build", COL_TEXT);
+    print("use POKE(0x5f2d,...) and host key bindings", COL_DIM);
+}
+
+static void cmd_splore(void)
+{
+    print("splore: online cart browser is not available in pico-c", COL_TEXT);
+    print("use 'load' with local .p8/.p8.png files", COL_DIM);
+}
+
+static void cmd_import_shell(const std::string &arg)
+{
+    if (arg.empty()) {
+        print_error("usage: import <filename>");
+        return;
+    }
+    print("import: " + arg + " is not supported in pico-c", COL_TEXT);
+    print("use a .p8 or .p8.png cart instead", COL_DIM);
+}
+
+static void cmd_export_shell(const std::string &arg)
+{
+    if (arg.empty()) {
+        print_error("usage: export <filename>");
+        return;
+    }
+    print("export: " + arg + " is not supported in pico-c", COL_TEXT);
+    print("use 'save <name>' to write a .p8 or .p8.png cart", COL_DIM);
+}
+
 static std::vector<std::string> tokenize(const std::string &s)
 {
     std::vector<std::string> t;
@@ -872,20 +951,13 @@ static void execute(const std::string &raw)
     else if (cmd == "cls" || cmd == "clear")    g_lines.clear();
     else if (cmd == "shutdown" || cmd == "exit" || cmd == "quit")
                                                 pico8_console_request_quit = 1;
-    /* Recognised PICO-8 commands that pico-c cannot implement yet: give an
-       honest message instead of pretending. */
-    else if (cmd == "splore")
-        print("splore: online cart browser is not available in pico-c", COL_TEXT);
-    else if (cmd == "edit")
-        print("edit: the built-in editor is not available in pico-c", COL_TEXT);
-    else if (cmd == "keyconfig")
-        print("keyconfig: button remapping is not available in pico-c", COL_TEXT);
+    else if (cmd == "edit")                     cmd_edit(arg);
+    else if (cmd == "keyconfig")                cmd_keyconfig();
+    else if (cmd == "splore")                    cmd_splore();
+    else if (cmd == "import")                    cmd_import_shell(arg);
+    else if (cmd == "export")                    cmd_export_shell(arg);
     else if (cmd == "install_demos" || cmd == "install_games")
         print(cmd + ": demo cartridges are not bundled with pico-c", COL_TEXT);
-    else if (cmd == "import")
-        print("import: png/wav import is not supported in pico-c", COL_TEXT);
-    else if (cmd == "export")
-        print("export: cart export is not supported in pico-c", COL_TEXT);
     else if (cmd == "login" || cmd == "logout" || cmd == "upload")
         print(cmd + ": online features are not available in pico-c", COL_TEXT);
     else {
