@@ -1998,7 +1998,7 @@ static int pico8_save(lua_State *L)
 
     int rc;
     if (path_has_ext(path, ".png"))
-        rc = -1;   /* writing .p8.png carts is not supported yet */
+        rc = pico8_cart_save_png(path.c_str());
     else
         rc = pico8_cart_save_p8(path.c_str());
 

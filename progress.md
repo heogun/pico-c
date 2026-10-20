@@ -266,14 +266,60 @@ PICO-8은 카트의 `__lua__` 소스가 **65536바이트를 넘거나 토큰이 
 표준 배터리는 **40/40 MATCH**. 그 밖에 256개 스니펫을 한 카트에 몰아넣은 합산
 대조와 무작위 토큰열 퍼즈 15카트를 오라클과 대조해 전부 일치했다.
 
+### 3-6. `.p8.png` 저장 (2026-10-20)
+
+참고 자료: Lexaloffle이 공개한 공식 압축기 `dansanderson/lexaloffle`
+(`pxa_compress_snippets.c`, `p8_compress.c`)와 위키 `P8PNGFileFormat`.
+
+**파일 구조** (160×205 RGBA8 = 32,800 = 0x8020 바이트)
+
+- 카트 바이트를 각 채널(R,G,B,**A**)의 하위 2비트에 스테가노그래피로 저장:
+  `byte = b | (g<<2) | (r<<4) | (a<<6)` (A가 최상위 2비트)
+- `0x0000..0x42ff` 데이터 영역, `0x4300..` 코드 영역, `0x8000..0x801f` 메타데이터
+  (버전 스탬프 `VV 00 02 07 6d 00` + SHA1 20바이트, 다운로드 카트는 전부 0)
+- 코드 영역: `\0pxa`(압축) / `:c:\0`(레거시) / 그 외는 NUL까지 평문
+
+**PXA 압축기** (`src/pxa.cpp`, `src/pxa.h`)
+
+- 공식 C 코드를 C++로 이식. 알고리즘·상수·정수 나눗셈 점수 계산을 그대로 유지
+  (`HASH_MAX 4096`, `MINI_HASH`, 3/3/5/4 비트 배분, score `i*256/bit_cost`,
+  raw 블록 재작성 0.2.0j 로직). 유일한 변경: `codo_malloc` → `std::vector`,
+  정적 해시 테이블 → 함수 지역 상태, `char *modified_code` → `std::vector`.
+- **검증**: 실카트(`coloro`, `rose_king`)의 압축 스트림이 PICO-8 파일과
+  **바이트 단위로 동일** (4190 / 5226바이트). 8개 카트 왕복 + 멱등성 확인.
+
+**PNG 인코더** (`cart_write_p8png`, `src/cart.cpp`)
+
+- 자체 구현: IHDR(160,205,8,6) + IDAT(stored deflate, zlib/adler32) +
+  `tEXt "LodePNG\00020110221"` + IEND. CRC32 테이블 내장.
+- 라벨 없는 카트는 검정(0,0,0) 픽셀 + 알파 하위비트로 데이터 표현.
+- 0x8020 페이로드는 실카트와 **바이트 동일** (blobbuild/blobcmp로 확인).
+  PNG 컨테이너 바이트는 LodePNG와 다름(무압축 zlib).
+
+**연결**
+
+- `pico8_cart_save_png` / `pico8_cart_save_rom_png` (pico8.h + cart.cpp)
+- `pico8_save`(api.cpp): `.png` 확장자 → `pico8_cart_save_png`
+- `pico8_cart_cstore`(cart.cpp): `.png` → `cart_write_p8png`
+- `g_cart_logo[32]`: 로드한 카트의 0x8000..0x801f 보존 → 저장 시 그대로 기록
+
+**검증**
+
+- 오라클이 우리가 쓴 `.p8.png`를 읽고 실행함 (여러 크기: 평문/압축 경계 포함)
+- 우리 로더도 자기 파일을 다시 읽음
+- 코드 영역 초과 시 `cart code does not fit the .p8.png code area` 후 파일 미생성
+- 글리프 소스는 charset 바이트로 저장 (PICO-8과 동일)
+- 표준 배터리 **40/40 MATCH** 유지
+
 ### 3-5. 이후 남은 로드맵
 - [x] **토큰 카운트 / 소스 크기 제한** — 완료 (§3-4): `src/tokens.cpp`의 독립
       토크나이저 + `check_source_limits()`로 8192토큰/65536바이트 제한과 두 메시지
       까지 오라클과 일치. `info()`의 콘솔 출력만 헤드리스에서 비교할 수 없어 그대로 둠.
+- [x] **`.p8.png` 저장** — 완료 (§3-6): 공식 PXA 압축기 이식 + 자체 PNG 인코더.
+      실카트 페이로드가 PICO-8 출력과 **바이트 동일**.
 - [ ] **성능**: 픽스포인트 연산 최적화, 병목 프로파일
 - [ ] 5단계 마무리: 셸/에디터 명령 중 미구현 `edit`(내장 에디터), `splore`(온라인),
       `keyconfig`(버튼 리맵) — 현재 "not available" 안내 출력 상태
-- [ ] (선택) `.p8.png` **저장** — PXA 압축기 필요 (읽기만 구현됨, 저장 미지원)
 - [ ] (방해 요소) `/Applications/PICO-8.app` 자체가 멈춤 — /tmp/p8app 사본 사용 유지
 
 ---

@@ -5,10 +5,13 @@
 #include <string>
 #include <vector>
 
+#include <stdint.h>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 #include "pico8.h"
+#include "pxa.h"
 
 /* Sizes that describe the compiled sprite/audio banks inside the cartridge
    image. They mirror the defines used by audio.cpp. */
@@ -81,6 +84,11 @@ static const int   kCartVersion = 43;
 /* The cart's data area (0x0000..0x42ff) exactly as it was loaded from disk.
    reload() restores from this and cstore() updates it before saving. */
 static uint8_t     g_cart_rom[PICO8_CART_DATA_SIZE];
+/* The 32 metadata bytes that live past the code area in a .p8.png cart
+   (0x8000..0x801f). BBS carts carry all zeroes; editor saves carry a version
+   stamp and a SHA1 of the preceding 0x8000 bytes. Preserved so a loaded
+   cart's stamp is written back unchanged. */
+static uint8_t     g_cart_logo[32];
 
 static void cart_snapshot_rom(void)
 {
@@ -485,6 +493,15 @@ static int load_p8png(const char *path)
     if (len <= 0) return -1;
     out[(size_t)len] = 0;
 
+    /* Preserve the 32 metadata bytes past the code area (version stamp and
+       optional SHA1) so a save() keeps them. */
+    memset(g_cart_logo, 0, sizeof(g_cart_logo));
+    if (num_pixels > 0x8000) {
+        size_t n = num_pixels - 0x8000;
+        if (n > sizeof(g_cart_logo)) n = sizeof(g_cart_logo);
+        memcpy(g_cart_logo, data.data() + 0x8000, n);
+    }
+
     std::string raw((char *)out.data(), (size_t)len);
     std::string full = preprocess_includes(get_dir(path), raw, 0);
 
@@ -760,6 +777,180 @@ int pico8_cart_save_rom_p8(const char *path)
     return cart_write_p8(path, g_cart_rom, g_cart_source, kCartVersion);
 }
 
+/* ------------------------------------------------------------------ *
+ *  .p8.png serialization
+ * ------------------------------------------------------------------ */
+
+/* Small PNG encoder (8-bit RGBA, one IDAT). PICO-8 writes its carts with
+   LodePNG and tags them with a "LodePNG 20110221" text chunk; the image
+   payload is reproduced byte for byte by fixing the LSBs of each channel,
+   so we emit the same chunk layout for tooling that looks for it. */
+static uint32_t png_crc32(const uint8_t *p, size_t n)
+{
+    static uint32_t table[256];
+    static bool ready = false;
+    if (!ready) {
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; k++)
+                c = (c & 1) ? (0xedb88320u ^ (c >> 1)) : (c >> 1);
+            table[i] = c;
+        }
+        ready = true;
+    }
+    uint32_t c = 0xffffffffu;
+    for (size_t i = 0; i < n; i++) c = table[(c ^ p[i]) & 0xff] ^ (c >> 8);
+    return c ^ 0xffffffffu;
+}
+
+static void png_be32(std::string &s, uint32_t v)
+{
+    s += (char)((v >> 24) & 0xff);
+    s += (char)((v >> 16) & 0xff);
+    s += (char)((v >> 8) & 0xff);
+    s += (char)(v & 0xff);
+}
+
+static void png_chunk(std::string &out, const char *type, const std::string &body)
+{
+    png_be32(out, (uint32_t)body.size());
+    std::string tagged = std::string(type, 4) + body;
+    out += tagged;
+    png_be32(out, png_crc32((const uint8_t *)tagged.data(), tagged.size()));
+}
+
+/* Deflate the filtered image with stored (uncompressed) blocks: valid zlib,
+   no dependency on a DEFLATE implementation. */
+static void zlib_stored(std::string &out, const std::string &raw)
+{
+    out += (char)0x78;                  /* CM=8, CINFO=7 */
+    out += (char)0x01;                  /* FCHECK so 0x7801 is a multiple */
+
+    size_t pos = 0;
+    while (pos < raw.size()) {
+        size_t n = raw.size() - pos;
+        if (n > 65535) n = 65535;
+        bool last = (pos + n >= raw.size());
+        out += (char)(last ? 1 : 0);
+        out += (char)(n & 0xff);
+        out += (char)((n >> 8) & 0xff);
+        out += (char)(~n & 0xff);
+        out += (char)((~n >> 8) & 0xff);
+        out.append(raw, pos, n);
+        pos += n;
+    }
+
+    uint32_t a = 1, b = 0;
+    for (size_t i = 0; i < raw.size(); i++) {
+        a = (a + (uint8_t)raw[i]) % 65521;
+        b = (b + a) % 65521;
+    }
+    png_be32(out, (b << 16) | a);
+}
+
+/* Byte `v` for pixel `p` is spread over the low two bits of every channel:
+   A holds the top bits, then R, G and finally B. */
+static void png_scatter(const uint8_t *const *rows, int height,
+                        const uint8_t *palette, int stride,
+                        std::string &filtered)
+{
+    filtered.clear();
+    filtered.reserve((size_t)(stride * 4 + 1) * (size_t)height);
+    for (int y = 0; y < height; y++) {
+        const uint8_t *data = rows[y];
+        filtered += (char)0;   /* filter type 0 (None) */
+        for (int x = 0; x < stride; x++) {
+            uint8_t v = data[x];
+            const uint8_t *c = palette + (y * stride + x) * 4;
+            filtered += (char)(c[0] | ((v >> 4) & 3));
+            filtered += (char)(c[1] | ((v >> 2) & 3));
+            filtered += (char)(c[2] | (v & 3));
+            filtered += (char)(c[3] | ((v >> 6) & 3));
+        }
+    }
+}
+
+static int cart_write_p8png(const char *path, const uint8_t *rom,
+                            const std::string &code, const uint8_t *logo)
+{
+    const int kWidth = 160;
+    const int kHeight = 205;
+
+    /* PICO-8 palettes its label from the alphabet of cartridge colours; a
+       cart with no label is drawn plain black (0x000000). */
+    static const uint8_t kPalette[4] = { 0x00, 0x00, 0x00, 0xff };
+
+    /* --- assemble the steganographic blob (0x8020 bytes). --- */
+    std::vector<uint8_t> blob((size_t)kWidth * kHeight, 0);
+    memcpy(blob.data(), rom, PICO8_CART_DATA_SIZE);
+
+    std::vector<uint8_t> packed((size_t)code.size() + 1024);
+    int packed_len = pxa_compress((const uint8_t *)code.data(), packed.data(),
+                                  (int)code.size());
+
+    /* PXA signals "not worth compressing" by copying the input back and
+       returning its length; the code section then holds plain text, which
+       PICO-8 also reads. Anything past what the code area holds is a
+       failure. */
+    if ((size_t)packed_len + 8 > 0x3d00) {
+        fprintf(stderr, "cart code does not fit the .p8.png code area\n");
+        return -1;
+    }
+    memcpy(blob.data() + 0x4300, packed.data(), (size_t)packed_len);
+
+    if (logo) memcpy(blob.data() + 0x8000, logo, 32);
+
+    /* --- spread the blob into the pixels and write the PNG. --- */
+    std::vector<const uint8_t *> rows((size_t)kHeight);
+    for (int y = 0; y < kHeight; y++) rows[y] = blob.data() + (size_t)y * kWidth;
+
+    std::string filtered;
+    png_scatter(rows.data(), kHeight, kPalette, kWidth, filtered);
+
+    std::string out = "\x89PNG\r\n\x1a\n";
+    {
+        std::string ihdr;
+        ihdr += (char)((kWidth >> 24) & 0xff);
+        ihdr += (char)((kWidth >> 16) & 0xff);
+        ihdr += (char)((kWidth >> 8) & 0xff);
+        ihdr += (char)(kWidth & 0xff);
+        ihdr += (char)((kHeight >> 24) & 0xff);
+        ihdr += (char)((kHeight >> 16) & 0xff);
+        ihdr += (char)((kHeight >> 8) & 0xff);
+        ihdr += (char)(kHeight & 0xff);
+        ihdr += (char)8;   /* bit depth    */
+        ihdr += (char)6;   /* colour type  */
+        ihdr += (char)0;   /* compression  */
+        ihdr += (char)0;   /* filter       */
+        ihdr += (char)0;   /* interlace    */
+        png_chunk(out, "IHDR", ihdr);
+    }
+    {
+        std::string z;
+        zlib_stored(z, filtered);
+        png_chunk(out, "IDAT", z);
+    }
+    png_chunk(out, "tEXt", std::string("LodePNG", 7) + std::string(1, '\0') +
+                               std::string("20110221", 8));
+    png_chunk(out, "IEND", std::string());
+
+    FILE *f = fopen(path, "wb");
+    if (!f) return -1;
+    size_t written = fwrite(out.data(), 1, out.size(), f);
+    fclose(f);
+    return (written == out.size()) ? 0 : -1;
+}
+
+int pico8_cart_save_png(const char *path)
+{
+    return cart_write_p8png(path, pico8_ram, g_cart_source, g_cart_logo);
+}
+
+int pico8_cart_save_rom_png(const char *path)
+{
+    return cart_write_p8png(path, g_cart_rom, g_cart_source, g_cart_logo);
+}
+
 /* Read just the data area of a cartridge (either .p8 or .p8.png) without
    touching RAM or the VM; used by reload() with an explicit filename. */
 int pico8_cart_read_data(const char *path, uint8_t *out, size_t out_len)
@@ -851,8 +1042,8 @@ int pico8_cart_cstore(int dest, int source, int len, const char *filename)
         out += ".p8";
 
     if (out.compare(out.size() - 4, 4, ".png") == 0)
-        return len;   /* .p8.png writing is not supported yet */
-
-    cart_write_p8(out.c_str(), g_cart_rom, g_cart_source, kCartVersion);
+        cart_write_p8png(out.c_str(), g_cart_rom, g_cart_source, g_cart_logo);
+    else
+        cart_write_p8(out.c_str(), g_cart_rom, g_cart_source, kCartVersion);
     return len;
 }

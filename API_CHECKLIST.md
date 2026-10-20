@@ -115,13 +115,20 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
       high nibble), `__gff__`, `__map__`, `__sfx__` (4 header bytes + 32 notes),
       `__music__` (flags folded into the top bit of each channel byte), `__label__`
 - [x] `.p8.png` image carts (sprite/RAM banks + compressed code area)
+- [x] `.p8.png` writer (`save()`/`cstore()` with a `.png` name), preserving the
+      32-byte version/SHA1 trailer of a loaded cart
 - [x] legacy `:c:` and `pxa` code decompression
+- [x] `.p8.png` writer: PXA-compressed code section (official Lexaloffle
+      compressor ported to `src/pxa.cpp`), cart payload byte-identical to
+      PICO-8's own output; small carts fall back to plain text. See
+      progress.md §3-6
 - [x] `#include` expansion relative to the cart's directory
 - [x] `.p8` writer: serializes live RAM (`__gfx__` nibble-swapped, `__gff__`,
       `__map__`, `__sfx__`, `__music__`) plus the preserved `__lua__` source,
       trimming trailing default lines and omitting empty sections
 - [x] Lua `load(filename, breadcrumb, param_str)` returns a boolean; `save(filename)`
-      writes a `.p8` (non-interactive `-x` PICO-8 defers the actual cart switch)
+      writes a `.p8` or a `.p8.png` according to the extension (non-interactive
+      `-x` PICO-8 defers the actual cart switch)
 
 ## Cartridge Data
 - [x] `cartdata(id)` (file-backed)

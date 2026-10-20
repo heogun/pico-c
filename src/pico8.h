@@ -162,6 +162,10 @@ const uint8_t *pico8_cart_rom(void);
 int pico8_cart_save_p8(const char *path);
 int pico8_cart_save_rom_p8(const char *path);
 
+/* Serialize to a .p8.png cartridge image (PXA-compressed code section). */
+int pico8_cart_save_png(const char *path);
+int pico8_cart_save_rom_png(const char *path);
+
 /* Read only a cartridge's data area (0x4300 bytes) without touching RAM. */
 int pico8_cart_read_data(const char *path, uint8_t *out, size_t out_len);
 
