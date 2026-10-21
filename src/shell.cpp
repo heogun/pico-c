@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include "pico8.h"
+#include "util.h"
 
 /* ------------------------------------------------------------------ */
 /*  Host requests raised by commands (handled by main.cpp)             */
@@ -82,61 +83,9 @@ enum {
 /*  Small helpers                                                      */
 /* ------------------------------------------------------------------ */
 
-/*
- * trim(s) — the string without its spaces.
- *
- * Removes the white space at the beginning and at the end.
- *
- * 앞뒤의 공백을 지운 문자열.
- */
-static std::string trim(const std::string &s)
-{
-    size_t a = 0, b = s.size();
-    while (a < b && isspace((unsigned char)s[a])) a++;
-    while (b > a && isspace((unsigned char)s[b - 1])) b--;
-    return s.substr(a, b - a);
-}
 
-/*
- * lower(s) — the string in small letters.
- *
- * Turns every letter into its small form.  The commands of the shell are
- * not case sensitive.
- *
- * 모든 알파벳을 소문자로 바꾼 문자열. 셸의 명령은 대소문자를 가리지 않는다.
- */
-static std::string lower(const std::string &s)
-{
-    std::string r = s;
-    for (size_t i = 0; i < r.size(); i++) r[i] = (char)tolower((unsigned char)r[i]);
-    return r;
-}
 
-/*
- * has_suffix(s, suf) — does the string end with that?
- *
- * True when the string ends with the given text.
- *
- * 그 문자열이 주어진 글자로 끝나면 참.
- */
-static bool has_suffix(const std::string &s, const char *suf)
-{
-    size_t n = strlen(suf);
-    return s.size() >= n && s.compare(s.size() - n, n, suf) == 0;
-}
 
-/*
- * basename_of(p) — the name of a file without its directory.
- *
- * Everything behind the last '/' or '\\'.
- *
- * 마지막 '/' 또는 '\\' 뒤의 부분.
- */
-static std::string basename_of(const std::string &p)
-{
-    size_t pos = p.find_last_of("/\\");
-    return (pos == std::string::npos) ? p : p.substr(pos + 1);
-}
 
 /*
  * put_text(x, y, s, color) — write a line of text on the screen.
@@ -441,7 +390,7 @@ void pico8_console_set_cart(const char *path, const char *source, size_t len)
     if (path) {
         g_has_cart = 1;
         g_cart_path = path;
-        g_cart_name = basename_of(path);
+        g_cart_name = util_path_base(path);
     }
     if (source && len)
         g_source.assign(source, len);
@@ -460,7 +409,7 @@ void pico8_console_set_cart(const char *path, const char *source, size_t len)
  */
 static bool is_cart_name(const std::string &n)
 {
-    return has_suffix(n, ".p8") || has_suffix(n, ".p8.png");
+    return util_has_suffix(n, ".p8") || util_has_suffix(n, ".p8.png");
 }
 
 /*
@@ -479,7 +428,7 @@ static std::string resolve_cart(const std::string &name)
 
     std::vector<std::string> cands;
     cands.push_back(name);
-    if (!has_suffix(name, ".p8") && !has_suffix(name, ".png")) {
+    if (!util_has_suffix(name, ".p8") && !util_has_suffix(name, ".png")) {
         cands.push_back(name + ".p8");
         cands.push_back(name + ".p8.png");
         cands.push_back(name + ".png");
@@ -492,18 +441,6 @@ static std::string resolve_cart(const std::string &name)
     return "";
 }
 
-/*
- * dir_of(p) — the directory of a path.
- *
- * Everything up to and including the last '/' or '\\'.
- *
- * 마지막 '/' 또는 '\\'까지의 부분.
- */
-static std::string dir_of(const std::string &p)
-{
-    size_t pos = p.find_last_of("/\\");
-    return (pos == std::string::npos) ? std::string() : p.substr(0, pos + 1);
-}
 
 /*
  * pico8_console_queue_load(filename, breadcrumb, param) — load a cart after this frame.
@@ -531,7 +468,7 @@ int pico8_console_queue_load(const char *filename, const char *breadcrumb,
     } else {
         std::string resolved = resolve_cart(req);
         if (resolved.empty()) {
-            std::string dir = dir_of(g_cart_path);
+            std::string dir = util_path_dir(g_cart_path);
             if (!dir.empty()) resolved = resolve_cart(dir + req);
         }
         if (resolved.empty() && req.size() && req[0] == '/') {
@@ -608,7 +545,7 @@ int pico8_console_load(const char *path)
     std::string prev_path = g_cart_path;
     std::string prev_name = g_cart_name;
     g_cart_path = path;
-    g_cart_name = basename_of(path);
+    g_cart_name = util_path_base(path);
 
     if (pico8_load_cart(path) != 0) {
         g_cart_path = prev_path;
@@ -697,7 +634,7 @@ static void cmd_help(const std::string &topic)
  */
 static void cmd_help_topic(const std::string &topic)
 {
-    std::string t = lower(topic);
+    std::string t = util_lower(topic);
 
     if (t == "gfx") {
         print_info("gfx api functions");
@@ -853,7 +790,7 @@ static void cmd_save(const std::string &arg)
     if (!g_has_cart) { print_error("save: no cartridge loaded"); return; }
 
     std::string out = arg.empty() ? g_cart_name : arg;
-    if (!has_suffix(out, ".p8") && !has_suffix(out, ".png"))
+    if (!util_has_suffix(out, ".p8") && !util_has_suffix(out, ".png"))
         out += ".p8";
 
     /* Plain .p8 carts keep their original text (header, label and all). */
@@ -867,7 +804,7 @@ static void cmd_save(const std::string &arg)
         return;
     }
 
-    if (has_suffix(out, ".png")) {
+    if (util_has_suffix(out, ".png")) {
         print_error("save: .p8.png output is not supported yet");
         return;
     }
@@ -985,7 +922,7 @@ void pico8_console_open_folder(void)
  */
 static void cmd_folder(const std::string &arg)
 {
-    std::string loc = lower(arg);
+    std::string loc = util_lower(arg);
     char buf[1024];
 
     if (loc.empty()) {
@@ -1074,7 +1011,7 @@ static void cmd_backup(void)
 
     system("mkdir -p backup");
     std::string out = "backup/" + g_cart_name;
-    if (!has_suffix(out, ".p8")) out += ".p8";
+    if (!util_has_suffix(out, ".p8")) out += ".p8";
 
     FILE *f = fopen(out.c_str(), "wb");
     if (!f) { print_error("backup: cannot write " + out); return; }
@@ -1247,7 +1184,7 @@ static void cmd_edit(const std::string &arg)
     std::string path = g_cart_path;
     if (path.empty()) {
         path = g_cart_name.empty() ? "edit.p8" : g_cart_name;
-        if (!has_suffix(path, ".p8") && !has_suffix(path, ".png"))
+        if (!util_has_suffix(path, ".p8") && !util_has_suffix(path, ".png"))
             path += ".p8";
     }
 
@@ -1394,7 +1331,7 @@ static void execute(const std::string &raw)
     std::vector<std::string> tok = tokenize(raw);
     if (tok.empty()) return;
 
-    std::string cmd = lower(tok[0]);
+    std::string cmd = util_lower(tok[0]);
     std::string arg = (tok.size() > 1) ? tok[1] : "";
     std::string arg2 = (tok.size() > 2) ? tok[2] : "";
 
@@ -1464,7 +1401,7 @@ void pico8_console_exec(const char *line)
  */
 static void submit(void)
 {
-    std::string raw = trim(g_input);
+    std::string raw = util_trim(g_input);
     g_input.clear();
     g_hist_pos = -1;
     if (raw.empty()) return;

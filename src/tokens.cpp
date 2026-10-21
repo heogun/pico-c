@@ -57,6 +57,7 @@
  */
 
 #include "pico8.h"
+#include "util.h"
 
 #include <cstring>
 
@@ -85,18 +86,6 @@ static int is_name_char(unsigned char c)
 }
 
 static int is_digit(unsigned char c) { return c >= '0' && c <= '9'; }
-
-/*
- * is_hex_digit(c) — is this a digit of a hexadecimal number?
- *
- * '0'..'9', 'a'..'f' and 'A'..'F'.
- *
- * '0'~'9', 'a'~'f', 'A'~'F'.
- */
-static int is_hex_digit(unsigned char c)
-{
-    return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
 
 /*
  * long_bracket_open(s, len, i) — the long bracket that starts here.
@@ -158,7 +147,7 @@ static size_t scan_number(const char *s, size_t len, size_t i)
 {
     if (s[i] == '0' && i + 1 < len && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
         i += 2;
-        while (i < len && (is_hex_digit((unsigned char)s[i]) || s[i] == '.'))
+        while (i < len && (util_is_hex_digit((unsigned char)s[i]) || s[i] == '.'))
             i++;
         return i;
     }

@@ -36,6 +36,7 @@
 
 #include "pico8.h"
 #include "pxa.h"
+#include "util.h"
 
 /* Sizes that describe the compiled sprite/audio banks inside the cartridge
    image. They mirror the defines used by audio.cpp. */
@@ -45,23 +46,6 @@
 /* ------------------------------------------------------------------ *
  *  Small helpers
  * ------------------------------------------------------------------ */
-
-/*
- * hex_digit(c) — the value of one hex digit.
- *
- * Turns '0'..'9', 'a'..'f' and 'A'..'F' into 0..15.  Anything else is
- * read as 0, so a broken file does not crash the loader.
- *
- * '0'~'9', 'a'~'f', 'A'~'F'를 0~15로 바꾼다. 그 외의 문자는 0으로 읽는다.
- * 망가진 파일이 로더를 죽이지 않게 하기 위해서다.
- */
-static inline int hex_digit(int c)
-{
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-    return 0;
-}
 
 /*
  * hex_pair(s, len, pos) — the value of two hex digits.
@@ -74,8 +58,8 @@ static inline int hex_digit(int c)
  */
 static int hex_pair(const char *s, size_t len, size_t pos)
 {
-    int a = (pos     < len) ? hex_digit((unsigned char)s[pos])     : 0;
-    int b = (pos + 1 < len) ? hex_digit((unsigned char)s[pos + 1]) : 0;
+    int a = (pos     < len) ? util_hex_digit((unsigned char)s[pos])     : 0;
+    int b = (pos + 1 < len) ? util_hex_digit((unsigned char)s[pos + 1]) : 0;
     return (a << 4) | b;
 }
 
@@ -88,23 +72,7 @@ static int hex_pair(const char *s, size_t len, size_t pos)
  */
 static int hex_single(const char *s, size_t len, size_t pos)
 {
-    return (pos < len) ? hex_digit((unsigned char)s[pos]) : 0;
-}
-
-/*
- * get_dir(path) — the directory a file lives in.
- *
- * Everything up to and including the last '/' or '\\'.  A path without a
- * separator has no directory, so the result is empty.
- *
- * 마지막 '/' 또는 '\\'까지의 부분. 구분자가 없는 경로에는 디렉터리가 없으므로
- * 결과가 비어 있다.
- */
-static std::string get_dir(const std::string &path)
-{
-    size_t p = path.find_last_of("/\\");
-    if (p == std::string::npos) return std::string();
-    return path.substr(0, p + 1);
+    return (pos < len) ? util_hex_digit((unsigned char)s[pos]) : 0;
 }
 
 /*
@@ -393,7 +361,7 @@ static std::string preprocess_includes(const std::string &dir,
                 std::string full = dir + name;
                 std::string inc;
                 if (read_whole_file(full.c_str(), inc))
-                    out += preprocess_includes(get_dir(full), inc, depth + 1);
+                    out += preprocess_includes(util_path_dir(full), inc, depth + 1);
                 continue;
             }
         }
@@ -592,8 +560,8 @@ static int parse_p8_text(const char *text, size_t textlen,
                 if (l[k] <= ' ' || l[k + 1] <= ' ') break;
                 if (gfx_off >= 0x2000) break;
                 cart_data[PICO8_GFX_ADDR + gfx_off++] =
-                    (uint8_t)(hex_digit((unsigned char)l[k + 1]) * 16 +
-                              hex_digit((unsigned char)l[k]));
+                    (uint8_t)(util_hex_digit((unsigned char)l[k + 1]) * 16 +
+                              util_hex_digit((unsigned char)l[k]));
             }
             break;
 
@@ -718,7 +686,7 @@ static int load_p8png(const char *path)
     }
 
     std::string raw((char *)out.data(), (size_t)len);
-    std::string full = preprocess_includes(get_dir(path), raw, 0);
+    std::string full = preprocess_includes(util_path_dir(path), raw, 0);
 
     /* UTF-8 glyph text -> charset bytes, the way the oracle stores text
        internally. Includes go through the same pass over the final text. */
@@ -767,7 +735,7 @@ static int load_p8_text(const char *path, const std::string &text)
     g_cart_path = path ? path : "";
     cart_snapshot_rom();
 
-    std::string full = preprocess_includes(get_dir(path), raw, 0);
+    std::string full = preprocess_includes(util_path_dir(path), raw, 0);
     full = pico8_charset_from_utf8(full.data(), full.size());
 
     int limit = check_source_limits(full);
