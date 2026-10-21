@@ -1,0 +1,5 @@
+a i=1 v=10
+b i=2 v=20
+c i=[nil] v=[nil]
+d i=[nil] v=[nil]
+e i=[nil] v=[nil]

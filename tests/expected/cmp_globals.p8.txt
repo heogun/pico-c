@@ -1,0 +1,14 @@
+pcall=nil
+xpcall=nil
+select=function
+pairs=function
+setmetatable=function
+rawget=function
+tostring=function
+loadstring=nil
+dofile=nil
+require=nil
+os=nil
+io=nil
+_ENV=table
+_G=nil

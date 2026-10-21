@@ -1,0 +1,2 @@
+info_ret=nil
+assert_true_ret=boolean val=true

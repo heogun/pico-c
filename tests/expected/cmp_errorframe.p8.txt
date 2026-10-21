@@ -1,0 +1,6 @@
+runtime error line 2 tab 0
+  return x.y
+attempt to index local 'x' (a nil value)
+in inner line 2 (tab 0)
+in outer line 5 (tab 0)
+at line 7 (tab 0)

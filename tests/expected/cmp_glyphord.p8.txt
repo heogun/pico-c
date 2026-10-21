@@ -1,0 +1,45 @@
+len=1
+ord1=139
+ord2=[nil]
+ord3=[nil]
+sub1=⬅️
+typ=string
+rawlen=6
+eqraw=false
+K code=128 len=1 name=█
+K code=129 len=1 name=▒
+K code=130 len=1 name=🐱
+K code=131 len=1 name=⬇️
+K code=132 len=1 name=░
+K code=133 len=1 name=✽
+K code=134 len=1 name=●
+K code=135 len=1 name=♥
+K code=136 len=1 name=☉
+K code=137 len=1 name=웃
+K code=138 len=1 name=⌂
+K code=139 len=1 name=⬅️
+K code=140 len=1 name=😐
+K code=141 len=1 name=♪
+K code=142 len=1 name=🅾️
+K code=143 len=1 name=◆
+K code=144 len=1 name=…
+K code=145 len=1 name=➡️
+K code=146 len=1 name=★
+K code=147 len=1 name=⧗
+K code=148 len=1 name=⬆️
+K code=149 len=1 name=ˇ
+K code=150 len=1 name=∧
+K code=151 len=1 name=❎
+K code=152 len=1 name=▤
+K code=153 len=1 name=▥
+cmp_ascii1=false
+cmp_ascii2=true
+cmp_ascii3=false
+cmp_glyph1=true
+cmp_glyph2=false
+cmp_glyph3=true
+cmp_glyphnum=true
+runtime error line 28 tab 0
+printh("cmp_glyphstr="..tostr(� < "zzz"))
+attempt to compare number with string
+at line 28 (tab 0)

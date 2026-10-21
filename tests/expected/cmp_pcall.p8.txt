@@ -1,0 +1,3 @@
+pcall=nil
+err=nil
+sgn=function

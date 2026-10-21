@@ -1,0 +1,6 @@
+rawlen=6
+glyphlen=1
+runtime error line 5 tab 0
+printh("g1="..ord(g,1).." g2="..ord(g,2).." g3="..ord(g,3).." g4="..ord(g,4))
+attempt to concatenate a nil value
+at line 5 (tab 0)

@@ -1,0 +1,14 @@
+# Carts that differ from the real PICO-8 on purpose.
+#
+# PICO-8 disables save() when a cart is started with -x (the batch mode used
+# to compare against the oracle), so the carts that exercise the .p8 and
+# .p8.png writers cannot be checked against it.
+#
+# For those carts the golden transcript in tests/expected/ is the one of
+# pico-c; the oracle script reports them as "KNOWN" instead of "DIFF".
+cmp_pngsave.p8
+cmp_savegen.p8
+
+# cmp_savereload.p8 used to be in this list as well.  It saves a cart and
+# loads it back, and the oracle now resolves the file it writes next to the
+# cart it runs, so it matches again.

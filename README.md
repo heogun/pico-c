@@ -31,23 +31,58 @@ A PICO-8 fantasy console emulator using z8lua (pico8 branch) for the Lua runtime
 
 ## Build
 
-### Linux / macOS
-```sh
-make
-./pico-c test.p8
-```
+Every supported platform has its own folder under `platforms/`, with the
+dependencies it needs and the scripts that build and test it.
 
-### Windows (MSYS2/MinGW)
+| Platform | Build | Test |
+|----------|-------|------|
+| macOS | `platforms/macos/build.sh` | `platforms/macos/test.sh` |
+| Linux | `platforms/linux/build.sh` | `platforms/linux/test.sh` |
+| Windows (MSYS2/MinGW) | `platforms/windows/build.bat` | `platforms/windows/test.bat` |
+
+The top level `Makefile` does the same thing and picks the platform from
+`uname -s`.  Every artifact lands in `build/<platform>/`, so the platforms
+never overwrite each other:
+
 ```sh
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2
-make CXX=x86_64-w64-mingw32-g++
-./pico-c.exe test.p8
+make                     # macOS, Linux or Windows
+make PLATFORM=windows    # force a platform
+./build/macos/pico-c tests/carts/test.p8
 ```
 
 ### Requirements
 - C++17 compiler (g++ or clang++)
 - SDL2 development libraries
 - Git (to clone z8lua)
+
+### Dependencies
+
+| Folder | Content |
+|--------|---------|
+| `platforms/common/deps/z8lua` | the Lua runtime, cloned by `make` |
+| `platforms/macos/deps/` | nothing vendored, SDL2 comes from MacPorts |
+| `platforms/linux/deps/` | nothing vendored, SDL2 comes from the system |
+| `platforms/windows/deps/SDL2-2.30.11` | the prebuilt MinGW-w64 SDL2 |
+
+## Tests
+
+The regression suite lives in `tests/`: `tests/carts` holds the test carts,
+`tests/expected` the golden transcripts they are compared with.  The
+transcripts were produced by the real PICO-8, so the suite checks pico-c
+against PICO-8 on every platform.
+
+```sh
+platforms/macos/test.sh              # the whole suite
+platforms/macos/test.sh cmp_all.p8   # a single cart
+```
+
+On macOS the transcripts can be compared with the real PICO-8 and refreshed:
+
+```sh
+platforms/macos/oracle.sh            # compare every cart
+platforms/macos/oracle.sh --record   # refresh tests/expected/
+```
+
 
 ## Controls
 

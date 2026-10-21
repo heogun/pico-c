@@ -1,7 +1,7 @@
 # --- Build artifacts ---
+build/
 obj/
 obj_asan/
-build/
 macbuild/
 *.o
 *.a
@@ -14,10 +14,10 @@ dumpcart
 .DS_Store
 
 # --- Dependencies (fetched/managed externally) ---
-# z8lua is cloned by `make` (see Makefile)
-z8lua/
+# z8lua is cloned by `make` into platforms/common/deps (see Makefile)
+platforms/common/deps/z8lua/
 # Windows/MinGW SDL2 dev libraries (huge vendored dependency)
-SDL2_mgw/
+platforms/windows/deps/SDL2-2.30.11/
 # Third-party test harness with its own repository
 picotestdriver/
 
@@ -25,13 +25,14 @@ picotestdriver/
 test_carts/
 
 # --- Scratch / one-off experiment carts ---
-test_*.p8
-*.p8d
-dumpcart.c
-p8dtest.p8
-runtest.p8
-# files the regression carts write while running (cmp_extcmd, cmp_printh)
-guard.p8
-ptest.txt
-runtest2.txt
+tests/carts/test_*.p8
+tests/carts/*.p8d
+tests/carts/p8dtest.p8
+tests/carts/runtest.p8
+# files the regression carts write while running (cmp_extcmd, cmp_printh, ...)
+tests/carts/guard.p8
+tests/carts/ptest.txt
+tests/carts/runtest2.txt
+tests/carts/p8save_out.p8
+tests/carts/p8png_out.p8.png
 tmp_*.p8

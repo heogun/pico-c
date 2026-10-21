@@ -14,6 +14,6 @@ poke(0x3200+2*68+0,0x30|(3<<6)) poke(0x3200+2*68+1,((7|(1<<3))<<4)|(7<<1)|1)
 poke(0x3200+2*68+64,0x00) poke(0x3200+2*68+65,0x40)
 -- music pattern 0: ch0=5 ch1=0x41 ch2=0x42|fstop ch3=0x43
 poke(0x3100,0x05) poke(0x3101,0x41) poke(0x3102,0x42|0x80) poke(0x3103,0x43)
-local ok = save("/tmp/p8save_out.p8")
+local ok = save("p8save_out.p8")
 printh("save="..tostr(ok))
 stop()

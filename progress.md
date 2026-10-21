@@ -7,12 +7,12 @@
 ## 0. 환경 / 규약 (중요)
 
 - **작업 디렉터리**: `/Users/mumal/Documents/pico-c` (이미 git 저장소)
-- **빌드**: `make` → `pico-c.exe`
-- **코드사인 필수**: 빌드마다 `codesign --force --sign - pico-c.exe`
+- **빌드**: `make PLATFORM=macos` (또는 `platforms/macos/build.sh`) → `build/macos/pico-c`
+- **코드사인 필수**: 빌드마다 `codesign --force --sign - pico-c`
   (amfid가 깨져있어 안 하면 실행 불가)
 - **오라클(실제 PICO-8) 사용법**: `/Applications/PICO-8.app`는 멈춤 → 반드시 사본 사용
   ```
-  ditto /Applications/PICO-8.app /tmp/p8app
+  cp -R /Applications/PICO-8.app /tmp/p8app
   codesign --force --deep --sign - /tmp/p8app
   ```
   실행은 백그라운드 + 출력 리다이렉트, 6~7초 대기 후 강제 종료:
@@ -21,12 +21,39 @@
   sleep 6; pkill -f p8app
   grep -v '^RUNNING' /tmp/a_out.txt
   ```
+  → 이 과정은 `platforms/macos/oracle.sh`로 자동화됨
 - **비교 규칙**: `diff <(grep -v '^DEBUG' ours.txt | sed '/^$/d') <(grep -v '^RUNNING' ref.txt | sed '/^$/d')`
 - 오라클의 작업 디렉터리는 `$HOME/Library/Application Support/pico-8/carts/`이므로
   상대 경로 파일 접근은 이쪽에 생기는 걸 주의할 것.
 - `z8lua` = `samhocevar/z8lua` **pico8 브랜치** (`make`가 git clone). `lua_Number` = `z8::fix32`.
   변환 헬퍼는 `src/pico8.h`: `fix32_from_int(int32_t)`, `fix32_to_int(fix32)` 등.
   `fix32(double)`, `fix32::frombits(int32_t)`도 있음.
+
+### 0-1. 폴더 구조 (2026-10-22 재편)
+
+```
+pico-c/
+├── src/                소스
+├── tools/              폰트/문자셋 생성기
+├── tests/              테스트 카트 + 골든 트랜스크립트
+│   ├── carts/          cmp_*.p8, test.p8, 부속 파일(cstore_base.p8, loadA/B.p8, cmp.p8d)
+│   ├── expected/       <cart>.txt 골든 + masks.txt + divergences.txt
+│   └── tools/          dumpcart.c
+├── platforms/          플랫폼별 의존성 + 빌드/테스트 스크립트
+│   ├── common/deps/z8lua/     (make가 클론, 공통)
+│   ├── macos/  build.sh|build.bat test.sh|test.bat oracle.sh  deps/(MacPorts SDL2)
+│   ├── linux/  build.sh|build.bat test.sh|test.bat             deps/(시스템 SDL2)
+│   └── windows/build.sh|build.bat test.sh|test.bat             deps/SDL2-2.30.11(MinGW)
+├── build/<platform>/   산출물 (pico-c, obj/, libz8lua.a)
+└── Makefile            PLATFORM=macos|linux|windows
+```
+
+- `cmp.sh` / `cmp_all.sh`(루트)는 `platforms/macos/oracle.sh`로 대체(단일/배터리/--record 지원).
+- `z8lua/` → `platforms/common/deps/z8lua`, `SDL2_mgw/` → `platforms/windows/deps/SDL2-2.30.11`.
+- `obj/ obj_asan/ macbuild/ pico-c.exe pico-c-asan dumpcart.exe` → `build/<platform>/`로 이동.
+- 골든 트랜스크립트(`tests/expected/*.txt`)는 **실제 PICO-8 출력**을 기록한 것이라
+  PICO-8이 없어도 모든 플랫폼에서 회귀 스위트를 돌릴 수 있다.
+
 
 ---
 
@@ -45,15 +72,17 @@
 - remote: `https://github.com/heogun/pico-c.git` (public, branch `main`)
 - commit `e5b08b8` "Add cart I/O, audio engine, tline/map fixes, system API and shell globals"
 - 작성자(이 저장소 local 전용): `heogeon <akffod2525@gmail.com>`
-- tracked 50 files, `.git` 452K. `.gitignore`로 `z8lua/`, `SDL2_mgw/`, `picotestdriver/`,
-  `test_carts/`, `obj*/`, `build/`, `macbuild/`, `*.exe`, `test_*.p8`, `*.p8d` 제외
+- tracked 50 files, `.git` 452K. `.gitignore`로 `platforms/common/deps/z8lua/`,
+  `platforms/windows/deps/SDL2-2.30.11/`, `picotestdriver/`,
+  `test_carts/`, `build/`, `obj*/`, `macbuild/`, `*.exe`, `tests/carts/test_*.p8`,
+  `tests/carts/*.p8d` 제외
 - **fresh clone 시**: macOS는 MacPorts `/opt/local`의 SDL2 필요 + `make`가 z8lua 클론(네트워크)
 
 ### 핵심 결과물
 - `src/` 11개 파일: `api.cpp`, `audio.cpp`, `cart.cpp`, `gfx.cpp`, `input.cpp`,
   `main.cpp`, `memory.cpp`, `pico8.h`, `shell.cpp`, `vm.cpp`, `stb_image.h`
-- **회귀 스위트 18/18 오라클 일치** (`cmp_*.p8` + `cmp.sh`)
-  (`cmp_savegen`/`cmp_savereload`는 의도적 차이: PICO-8이 `-x`에서 `save()` 비활성화)
+- **회귀 스위트 18/18 오라클 일치** (`tests/carts/cmp_*.p8` + `platforms/macos/oracle.sh`)
+  (`cmp_savegen`/`cmp_savereload`/`cmp_pngsave`는 의도적 차이: PICO-8이 `-x`에서 `save()` 비활성화)
 - `API_CHECKLIST.md` 갱신됨
 
 ---
@@ -207,14 +236,20 @@ PICO-8은 텍스트를 **charset 바이트**로 저장하고 경계에서만 UTF
       (참고: `save()`는 `-x` 실행에서 PICO-8이 조용히 무시함 — 파일이 안 생김)
 
 ### 3-3. 회귀 확인 방법
-- `./cmp.sh <cart.p8>` 한 개, `./cmp_all.sh <cart...>` 여러 개
-  (둘 다 `/tmp/p8app` 사본을 오라클로 사용, `LC_ALL=C`로 바이트 비교)
-- 표준 배터리: `./cmp_all.sh $(ls cmp_*.p8 | grep -v "savegen\|savereload")`
-  → 현재 **40/40 MATCH**
-- `cmp_stat`은 `stat(84)`/`stat(94)`가 초 경계에서 1초 차이 나는 **플레이크**
-  → 재실행 시 통과
-- 제외 2종: `cmp_savegen` / `cmp_savereload` — `save()`는 `-x` 실행에서 PICO-8이
+- `platforms/macos/oracle.sh <cart...>` — 오라클(PICO-8 사본)과 우리 구현을 비교.
+  `--record`를 주면 `tests/expected/<cart>.txt` 골든 트랜스크립트를 갱신한다.
+- 표준 배터리: `platforms/macos/oracle.sh` (tests/carts/cmp_*.p8 전체)
+  → 현재 **43 MATCH + 2 KNOWN**(KNOWN은 의도적 차이)
+- PICO-8이 없어도 되는 순수 회귀: `platforms/<plat>/test.sh`
+  → 골든 트랜스크립트(`tests/expected/`)와 비교, 어느 플랫폼에서나 동작
+- `cmp_stat`은 시계 값(`stat(80..85)` UTC / `stat(90..95)` local)이 실행 시각에 따라
+  변해서 **플레이크**가 된다 — 초는 1초, 분은 1분, 시는 1시간, 일은 자정마다 바뀐다
+  → `tests/expected/masks.txt`에서 시계 필드 전체를 마스크 처리
+  → 대신 `tests/carts/cmp_stat_time.p8`가 "각 필드가 항상 올바른 범위에 있는가"만
+    검사하므로 시각과 무관하게 시계 동작을 검증한다
+- 제외 2종: `cmp_savegen` / `cmp_pngsave` — `save()`는 `-x` 실행에서 PICO-8이
   조용히 무시해서 파일 쓰기를 비교할 수 없음
+  (`tests/expected/divergences.txt`에 명시)
 - `cmp_glyphord`의 글리프 전역 `pairs()` 순서는 **해시 순서(구현 정의)**라
   카트에서 정렬한 뒤 비교한다 (집합 자체는 이전부터 일치).
 

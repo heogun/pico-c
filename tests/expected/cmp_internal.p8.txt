@@ -1,0 +1,17 @@
+t1=number
+t2=string
+t3=nil
+t4=table
+t5=function
+t6=number
+pausemenu=table
+pm_keys=0
+gmis=
+setfps=
+markcpu=
+sfrm=
+mlx=
+ufr=
+ubtn=
+sds=
+sful=

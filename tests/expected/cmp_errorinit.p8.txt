@@ -1,0 +1,6 @@
+before _init
+runtime error line 4 tab 0
+  t.x = 1
+attempt to index local 't' (a nil value)
+in _init line 4 (tab 0)
+at line 1 (tab 1)

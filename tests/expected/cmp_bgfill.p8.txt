@@ -1,0 +1,3 @@
+map_nofill p0=1
+map_fill p0=12
+tline_fill p0=12

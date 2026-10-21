@@ -1,0 +1,17 @@
+# Masks applied to a transcript before it is compared.
+#
+# Format:  <cart>|<sed expression>
+# The expression is applied to both sides of the comparison, so a value that
+# cannot be reproduced exactly does not make the suite flaky.
+#
+# stat(80..85) is the UTC clock and stat(90..95) the local one; both are
+# year, month, day, hour, minute, second.  Every one of those fields depends
+# on the moment the cart runs, so the recorded transcript could never be
+# reproduced literally: the second changes within a run, the minute within a
+# minute, the hour on the hour and the day at midnight.  They are all masked
+# here.
+#
+# The clock itself is still covered, in a way that does not depend on the
+# time of day: tests/carts/cmp_stat_time.p8 checks that every field is in
+# the range PICO-8 puts it in.
+cmp_stat.p8|s/(s8[0-5]=)[0-9]+/\1X/g; s/(s9[0-5]=)[0-9]+/\1X/g

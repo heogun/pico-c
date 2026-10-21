@@ -2,7 +2,7 @@ pico-8 cartridge // http://www.pico8.com
 version 41
 __lua__
 -- reload the data area from the file our writer produced and dump it
-reload(0,0,0x4300,"/tmp/p8save_out.p8")
+reload(0,0,0x4300,"p8save_out.p8")
 printh("g0="..tostr(peek(0x0000)).." g1="..tostr(peek(0x0001)).." g2="..tostr(peek(0x0002)).." g3="..tostr(peek(0x0003)))
 printh("g16="..tostr(peek(0x0010)).." g1fff="..tostr(peek(0x1fff)))
 printh("ff0="..tostr(peek(0x3000)).." ffff="..tostr(peek(0x30ff)))
