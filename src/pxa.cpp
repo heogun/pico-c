@@ -98,6 +98,17 @@ static uint8 *dest_buf = NULL;
 static int    bit      = 1;
 static int    dest_pos = 0;
 
+/*
+ * putbit(bval) — one bit into the output.
+ *
+ * Writes a single bit into the destination buffer.  The bits go out least
+ * significant bit first, and the buffer is not cleared first, so the
+ * markers that are written later can be put into the bits that are still
+ * free.
+ *
+ * 출력 버퍼에 비트 하나를 쓴다. 비트는 낮은 자리부터 나가고, 버퍼를 먼저
+ * 지우지 않으므로 나중에 쓰는 표지가 아직 비어 있는 비트에 들어가도 된다.
+ */
 static void putbit(int bval)
 {
     dest_buf[dest_pos] &= (uint8)~bit;      /* per-bit, don't clobber      */
@@ -110,6 +121,13 @@ static void putbit(int bval)
     }
 }
 
+/*
+ * putval(val, bits) — a number into the output.
+ *
+ * Writes the lowest `bits` bits of the number, one bit at a time.
+ *
+ * 숫자의 하위 `bits`비트를 한 비트씩 쓴다.
+ */
 static int putval(int val, int bits)
 {
     if (bits <= 0) return 0;
@@ -117,7 +135,17 @@ static int putval(int val, int bits)
     return bits;
 }
 
-/* Write `val` as a 3-bit chain: 7,7,7,...,remainder. */
+/*
+ * putchain(val, link_bits, max_bits) — a number as a chain.
+ *
+ * Writes the number in pieces of `link_bits` bits: the full piece
+ * followed by the rest, until the rest fits in one piece.  This is how
+ * the lengths and the categories are written.
+ *
+ * 숫자를 `link_bits`비트짜리 조각으로 나누어 쓴다. 가득 찬 조각 다음에
+ * 나머지를 쓰고, 나머지가 한 조각에 들어가면 끝낸다. 길이와 분류는
+ * 이렇게 쓰인다.
+ */
 static int putchain(int val, int link_bits, int max_bits)
 {
     const int max_link_val = (1 << link_bits) - 1;
@@ -133,7 +161,15 @@ static int putchain(int val, int link_bits, int max_bits)
     return bits_written;
 }
 
-/* Block distance: 1 + 15 / 01 + 10 / 00 + 5 bits, cheapest first. */
+/*
+ * putnum(val) — a distance into the output.
+ *
+ * The distance to a block is written so that the close ones are the
+ * cheapest: 1 + 15 / 01 + 10 / 00 + 5 bits.
+ *
+ * 블록까지의 거리를 가장 가까운 것이 가장 싸게 나오도록 쓴다.
+ * 1 + 15 / 01 + 10 / 00 + 5비트.
+ */
 static int putnum(int val)
 {
     const int jump = BLOCK_DIST_BITS;
@@ -159,7 +195,16 @@ struct pxa_state {
     int     found[HASH_MAX];
 };
 
-/* Build per-hash lists of the positions where each 3-byte hash occurs. */
+/*
+ * pxa_build_hash_lookup(st, in, len) — where every three byte piece occurs.
+ *
+ * Goes over the input and files away, for every three byte hash, the
+ * places where it occurs.  The lists grow as they are filled, so a piece
+ * that occurs often does not get lost.
+ *
+ * 입력을 훑으면서 3바이트 해시마다 그 해시가 나타난 자리를 기록한다. 목록은
+ * 차면서 늘어나므로 자주 나오는 조각이 사라지지 않는다.
+ */
 static void pxa_build_hash_lookup(pxa_state &st, const uint8 *in, int len)
 {
     int hash;
@@ -199,6 +244,27 @@ static void pxa_build_hash_lookup(pxa_state &st, const uint8 *in, int len)
     }
 }
 
+/*
+ * pxa_find_repeatable_block(st, dat, pos, data_len, block_offset, score_out) —
+ * the block that repeats here.
+ *
+ * Looks for the piece before `pos` that repeats at `pos`, and returns how
+ * long the repetition is.  The distance and the score of the best block
+ * are put into `block_offset` and `score_out`.
+ *
+ * The score says how good the block is: the number of bytes it saves
+ * against the number of bits it costs.  The block that repeats within
+ * itself is compared as well, so a block that repeats over and over is
+ * counted at its full length.
+ *
+ * `pos` 바로 전에 나온 조각 중 `pos`에서 반복되는 것을 찾아 그 길이를
+ * 돌려준다. 가장 좋은 블록의 거리와 점수는 `block_offset`와 `score_out`에
+ * 들어간다.
+ *
+ * 점수는 블록이 얼마나 좋은지를 나타낸다. 아끼는 바이트 수를 비용 비트 수로
+ * 나눈 값이다. 스스로 반복되는 블록도 함께 비교하므로, 계속 반복되는 블록은
+ * 전체 길이만큼 계산된다.
+ */
 static int pxa_find_repeatable_block(pxa_state &st, uint8 *dat, int pos,
                                      int data_len, int *block_offset,
                                      int *score_out)
@@ -263,6 +329,16 @@ static int pxa_find_repeatable_block(pxa_state &st, uint8 *dat, int pos,
  *  Compressor
  * ------------------------------------------------------------------ */
 
+/*
+ * init_literals_state(literal, literal_pos) — the table of the literals.
+ *
+ * The table that says how expensive it is to write a character as a
+ * literal.  It is the move-to-front table of the decompressor: the
+ * characters that were used last are the cheapest.
+ *
+ * 리터럴로 쓸 때 문자가 얼마나 비싼지를 알려주는 테이블이다. 해제기의
+ * move-to-front 테이블과 같다. 마지막에 쓴 문자가 가장 싸다.
+ */
 static void init_literals_state(int *literal, int *literal_pos)
 {
     for (int i = 0; i < 256; i++) literal[i] = i;
@@ -274,6 +350,34 @@ static void init_literals_state(int *literal, int *literal_pos)
 #define RESTORE_VLIST_STATE()  memcpy(literal, literal_backup, sizeof(literal)); \
                                memcpy(literal_pos, literal_pos_backup, sizeof(literal_pos));
 
+/*
+ * pxa_compress(in_p, out, len) — compress the code of a cart.
+ *
+ * Compresses the source of a cart into the PXA format that a .p8.png
+ * car holds.  The result starts with the four bytes "\0pxa", then the
+ * length of the text and the length of the compressed block, and then the
+ * bit stream.
+ *
+ * The text is compressed the way the oracle compresses it: every place is
+ * compared with the place before it, and the block that saves the most
+ * bits wins.  A stretch that does not compress at all is written out
+ * plain, with a marker in front of it.
+ *
+ * When the compression made the thing bigger, the input is copied back
+ * unchanged and its length is returned; the code section then holds plain
+ * text, which PICO-8 reads as well.
+ *
+ * 카트의 소스를 .p8.png 카트가 들고 있는 PXA 형식으로 압축한다. 결과는
+ * "\0pxa" 네 바이트, 텍스트 길이, 압축 블록 길이, 그다음 비트 스트림으로
+ * 시작한다.
+ *
+ * 텍스트는 오라클과 같은 방식으로 압축한다. 모든 자리를 앞 자리와 비교하고
+ * 비트를 가장 많이 아끼는 블록이 이긴다. 전혀 압축되지 않는 구간은 표지를
+ * 붙여 그대로 써 넣는다.
+ *
+ * 압축한 쪽이 더 커졌다면 입력 내용을 그대로 복사하고 그 길이를 돌려준다.
+ * 그때 코드 섹션에는 평문이 들어가는데, PICO-8도 그것을 읽는다.
+ */
 int pxa_compress(const uint8 *in_p, uint8 *out, int len)
 {
     int pos = 0;

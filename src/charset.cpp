@@ -43,6 +43,21 @@ struct GlyphSeq {
 ** characters PICO-8 does not know) is copied byte for byte, so an unknown
 ** character stays a run of raw bytes just like it does on the oracle.
 */
+
+/*
+ * pico8_charset_from_utf8(src, len) — the source text as the machine holds it.
+ *
+ * PICO-8 stores its text as single bytes that index its own font, so the
+ * glyphs of the charset have to become one byte each.  Everything else
+ * (ASCII and the characters PICO-8 does not know) is copied byte for
+ * byte, so an unknown character stays a run of raw bytes just like it
+ * does on the oracle.
+ *
+ * PICO-8은 텍스트를 자기 폰트의 번호인 한 바이트씩으로 저장하므로, charset의
+ * 글자는 한 바이트로 줄어들어야 한다. 그 밖의 것(ASCII와 PICO-8이 모르는 문자)은
+ * 바이트 그대로 복사하므로, 모르는 문자는 오라클과 똑같이 원본 바이트열로
+ * 남는다.
+ */
 std::string pico8_charset_from_utf8(const char *src, size_t len)
 {
     std::string out;
@@ -74,6 +89,19 @@ std::string pico8_charset_from_utf8(const char *src, size_t len)
 ** A NUL stops the conversion: printh() on the oracle has C-string
 ** semantics, so printh("a"..chr(0).."b") prints just "a".
 */
+
+/*
+ * pico8_charset_to_utf8(src, len) — the machine's text as UTF-8.
+ *
+ * The other way round: for everything that leaves the VM as text, the
+ * console, the error messages and the __lua__ section of a saved cart.
+ * A NUL stops the conversion: printh() on the oracle has C-string
+ * semantics, so printh("a"..chr(0).."b") prints just "a".
+ *
+ * 반대 방향이다. VM 밖으로 텍스트로 나가는 모든 곳(셸, 오류 메시지, 저장한
+ * 카트의 __lua__ 섹션)에 쓰인다. NUL을 만나면 변환이 끝난다. 오라클의 printh()는
+ * C 문자열처럼 동작하므로 printh("a"..chr(0).."b")는 "a"만 출력한다.
+ */
 std::string pico8_charset_to_utf8(const char *src, size_t len)
 {
     std::string out;

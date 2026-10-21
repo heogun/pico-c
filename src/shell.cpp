@@ -82,6 +82,13 @@ enum {
 /*  Small helpers                                                      */
 /* ------------------------------------------------------------------ */
 
+/*
+ * trim(s) — the string without its spaces.
+ *
+ * Removes the white space at the beginning and at the end.
+ *
+ * 앞뒤의 공백을 지운 문자열.
+ */
 static std::string trim(const std::string &s)
 {
     size_t a = 0, b = s.size();
@@ -90,6 +97,14 @@ static std::string trim(const std::string &s)
     return s.substr(a, b - a);
 }
 
+/*
+ * lower(s) — the string in small letters.
+ *
+ * Turns every letter into its small form.  The commands of the shell are
+ * not case sensitive.
+ *
+ * 모든 알파벳을 소문자로 바꾼 문자열. 셸의 명령은 대소문자를 가리지 않는다.
+ */
 static std::string lower(const std::string &s)
 {
     std::string r = s;
@@ -97,18 +112,40 @@ static std::string lower(const std::string &s)
     return r;
 }
 
+/*
+ * has_suffix(s, suf) — does the string end with that?
+ *
+ * True when the string ends with the given text.
+ *
+ * 그 문자열이 주어진 글자로 끝나면 참.
+ */
 static bool has_suffix(const std::string &s, const char *suf)
 {
     size_t n = strlen(suf);
     return s.size() >= n && s.compare(s.size() - n, n, suf) == 0;
 }
 
+/*
+ * basename_of(p) — the name of a file without its directory.
+ *
+ * Everything behind the last '/' or '\\'.
+ *
+ * 마지막 '/' 또는 '\\' 뒤의 부분.
+ */
 static std::string basename_of(const std::string &p)
 {
     size_t pos = p.find_last_of("/\\");
     return (pos == std::string::npos) ? p : p.substr(pos + 1);
 }
 
+/*
+ * put_text(x, y, s, color) — write a line of text on the screen.
+ *
+ * Draws the string with the built-in font, one character every four
+ * pixels.
+ *
+ * 내장 폰트로 문자열을 그린다. 문자 하나마다 네 픽셀씩.
+ */
 static void put_text(int x, int y, const std::string &s, uint8_t color)
 {
     int cx = x;
@@ -118,7 +155,14 @@ static void put_text(int x, int y, const std::string &s, uint8_t color)
     }
 }
 
-/* Split a (possibly multi-line) string into wrapped console lines. */
+/*
+ * add_line(text, color) — one more line in the scrollback.
+ *
+ * Adds the text to the scrollback of the console.  A text that is longer
+ * than the screen is cut into several lines.
+ *
+ * 텍스트를 셸의 스크롤백에 더한다. 화면보다 긴 텍스트는 여러 줄로 잘린다.
+ */
 static void add_line(const std::string &text, uint8_t color)
 {
     if (text.empty()) {
@@ -129,6 +173,16 @@ static void add_line(const std::string &text, uint8_t color)
         g_lines.push_back(ConsoleLine{color, text.substr(i, COLS)});
 }
 
+/*
+ * print(text, color) — write something in the console.
+ *
+ * Splits the text at the line breaks and adds every piece to the
+ * scrollback.  The scrollback holds the last 500 lines; the older ones are
+ * thrown away.
+ *
+ * 텍스트를 줄바꿈으로 쪼개어 각 조각을 스크롤백에 더한다. 스크롤백은 최근
+ * 500줄을 남기고 더 오래된 것은 버린다.
+ */
 static void print(const std::string &text, uint8_t color)
 {
     size_t start = 0;
@@ -146,7 +200,22 @@ static void print(const std::string &text, uint8_t color)
         g_lines.erase(g_lines.begin(), g_lines.begin() + (g_lines.size() - kMaxScrollback));
 }
 
+/*
+ * print_error(s) — an error message.
+ *
+ * An error message in the colour of the errors.
+ *
+ * 오류 색으로 쓰인 오류 메시지.
+ */
 static void print_error(const std::string &s) { print(s, COL_ERROR); }
+
+/*
+ * print_info(s) — an information line.
+ *
+ * A line in the colour of the information.
+ *
+ * 정보 색으로 쓰인 한 줄.
+ */
 static void print_info(const std::string &s)  { print(s, COL_INFO); }
 
 /* ------------------------------------------------------------------ */
@@ -155,8 +224,24 @@ static void print_info(const std::string &s)  { print(s, COL_INFO); }
 
 static int g_capturing = 0;
 
+/*
+ * pico8_console_capturing() — is the console collecting the output?
+ *
+ * While the output of a cart is being collected, the host does not put it
+ * on the screen itself.  This tells the two apart.
+ *
+ * 카트의 출력을 모으는 동안 호스트는 그 내용을 화면에 직접 띄우지 않는다.
+ * 이 함수가 둘을 구분한다.
+ */
 int pico8_console_capturing(void) { return g_capturing; }
 
+/*
+ * pico8_console_emit(text, color) — the output of a cart.
+ *
+ * The text a cart printed, which goes into the scrollback of the console.
+ *
+ * 카트가 출력한 텍스트. 셸의 스크롤백에 들어간다.
+ */
 void pico8_console_emit(const char *text, int color)
 {
     if (text) print(text, (uint8_t)color);
@@ -166,6 +251,16 @@ void pico8_console_emit(const char *text, int color)
 /*  Boot splash                                                        */
 /* ------------------------------------------------------------------ */
 
+/*
+ * pico8_console_init() — a fresh console.
+ *
+ * Empties the scrollback, the input line and the history, and forgets the
+ * cart that was loaded.  This is what the machine does when it is switched
+ * on.
+ *
+ * 스크롤백, 입력 줄, 히스토리를 비우고, 불러온 카트를 잊는다. 기계가 켜질
+ * 때 하는 일이다.
+ */
 void pico8_console_init(void)
 {
     g_lines.clear();
@@ -184,17 +279,43 @@ void pico8_console_init(void)
     pico8_console_request_quit = 0;
 }
 
+/*
+ * pico8_console_shell_reset() — an empty input line.
+ *
+ * Clears what was typed and forgets the place in the history.
+ *
+ * 입력한 내용을 지우고 히스토리 위치를 잊는다.
+ */
 void pico8_console_shell_reset(void)
 {
     g_input.clear();
     g_hist_pos = -1;
 }
 
+/*
+ * pico8_console_boot_finished(elapsed_ms) — is the boot splash over?
+ *
+ * True once the splash has been on the screen long enough.
+ *
+ * 부팅 화면이 충분히 오래 있었으면 참.
+ */
 int pico8_console_boot_finished(uint32_t elapsed_ms)
 {
     return elapsed_ms >= PICO8_BOOT_MS;
 }
 
+/*
+ * pico8_console_boot_draw(t) — draw the boot splash.
+ *
+ * Draws the splash at the time `t` (in milliseconds since the machine was
+ * switched on).  The letters of the logo come one by one and flash a
+ * colour before they turn white; the subtitle and the version tag follow,
+ * and a thin line sweeps along the bottom edge.
+ *
+ * 기계를 켠 뒤 `t`밀리초 시점의 부팅 화면을 그린다. 로고의 글자가 하나씩
+ * 나오며 흰색으로 바뀌기 전에 색을 한 번 깜빡인다. 그다음 부제와 버전 표시가
+ * 나오고, 아래 가장자리를 가는 선이 한 번 지나간다.
+ */
 void pico8_console_boot_draw(uint32_t t)
 {
     pico8_clear_screen(COL_BG);
@@ -245,6 +366,14 @@ void pico8_console_boot_draw(uint32_t t)
 /*  Shell rendering                                                    */
 /* ------------------------------------------------------------------ */
 
+/*
+ * pico8_console_shell_draw() — draw the shell.
+ *
+ * Draws the scrollback, the prompt with what has been typed and a block
+ * cursor that blinks.
+ *
+ * 스크롤백, 프롬프트와 입력 중인 글자, 깜빡이는 블록 커서를 그린다.
+ */
 void pico8_console_shell_draw(void)
 {
     pico8_clear_screen(COL_BG);
@@ -286,11 +415,27 @@ void pico8_console_shell_draw(void)
     }
 }
 
+/*
+ * pico8_console_print(line) — a line from the host.
+ *
+ * Prints a line that the host itself wants to show in the console.
+ *
+ * 호스트가 셸에 보여주고 싶은 한 줄을 출력한다.
+ */
 void pico8_console_print(const char *line)
 {
     if (line) print(line, COL_TEXT);
 }
 
+/*
+ * pico8_console_set_cart(path, source, len) — remember the cart.
+ *
+ * Tells the shell which cart is loaded and keeps its source, so that the
+ * commands can show and save it.
+ *
+ * 셸에 어느 카트가 올라와 있는지 알려 주고 소스를 보관한다. 그래야 명령들이
+ * 그 카트를 보여주고 저장할 수 있다.
+ */
 void pico8_console_set_cart(const char *path, const char *source, size_t len)
 {
     if (path) {
@@ -306,11 +451,28 @@ void pico8_console_set_cart(const char *path, const char *source, size_t len)
 /*  Cartridge files                                                    */
 /* ------------------------------------------------------------------ */
 
+/*
+ * is_cart_name(n) — is that the name of a cartridge?
+ *
+ * True for a .p8 file and for a .p8.png file.
+ *
+ * .p8 파일과 .p8.png 파일이면 참.
+ */
 static bool is_cart_name(const std::string &n)
 {
     return has_suffix(n, ".p8") || has_suffix(n, ".p8.png");
 }
 
+/*
+ * resolve_cart(name) — find the cartridge with that name.
+ *
+ * Looks for the file and, when the name has no extension, tries the three
+ * names that PICO-8 would try: .p8, .p8.png and .png.  An empty result
+ * means that there is no such file.
+ *
+ * 파일을 찾는다. 확장자가 없으면 PICO-8이 시도하는 세 이름(.p8, .p8.png, .png)을
+ * 순서대로 시도한다. 결과가 비어 있으면 그런 파일이 없다는 뜻이다.
+ */
 static std::string resolve_cart(const std::string &name)
 {
     if (name.empty()) return "";
@@ -330,14 +492,35 @@ static std::string resolve_cart(const std::string &name)
     return "";
 }
 
+/*
+ * dir_of(p) — the directory of a path.
+ *
+ * Everything up to and including the last '/' or '\\'.
+ *
+ * 마지막 '/' 또는 '\\'까지의 부분.
+ */
 static std::string dir_of(const std::string &p)
 {
     size_t pos = p.find_last_of("/\\");
     return (pos == std::string::npos) ? std::string() : p.substr(0, pos + 1);
 }
 
-/* Queue a cartridge to load (and run) after the current frame. A null/empty
-   filename means "reload the current cartridge". Returns 0 when queued. */
+/*
+ * pico8_console_queue_load(filename, breadcrumb, param) — load a cart after this frame.
+ *
+ * Puts a cartridge on the list of things the host has to do.  An empty
+ * file name means "load the cart that is running again".  The breadcrumb
+ * is the name of the place the cart comes from and the parameter is the
+ * string the cart gets with stat(6).
+ *
+ * Returns 0 when the cart was found and queued.
+ *
+ * 호스트가 다음에 해야 할 일 목록에 카트를 올린다. 파일 이름이 비어 있으면
+ * "지금 실행 중인 카트를 다시 불러라"는 뜻이다. breadcrumb은 카트가 오는
+ * 곳의 이름이고, parameter는 카트가 stat(6)으로 받는 문자열이다.
+ *
+ * 카트를 찾아 큐에 올렸으면 0을 돌려준다.
+ */
 int pico8_console_queue_load(const char *filename, const char *breadcrumb,
                              const char *param)
 {
@@ -367,14 +550,53 @@ int pico8_console_queue_load(const char *filename, const char *breadcrumb,
     return 0;
 }
 
+/*
+ * pico8_console_breadcrumb() — where the cart comes from.
+ *
+ * The place the queued cart comes from, or NULL when there is none.
+ *
+ * 큐에 올린 카트가 오는 곳. 없으면 NULL.
+ */
 const char *pico8_console_breadcrumb(void)
 {
     return g_pending_breadcrumb.empty() ? NULL : g_pending_breadcrumb.c_str();
 }
 
+/*
+ * pico8_console_pending_path() — the cart that is waiting.
+ *
+ * The path of the cartridge that was queued.
+ *
+ * 큐에 올려 둔 카트의 경로.
+ */
 const char *pico8_console_pending_path(void)  { return g_pending_path.c_str(); }
+
+/*
+ * pico8_console_pending_param() — the parameter of the queued cart.
+ *
+ * The string the queued cart gets with stat(6).
+ *
+ * 큐에 올려 둔 카트가 stat(6)으로 받는 문자열.
+ */
 const char *pico8_console_pending_param(void) { return g_pending_param.c_str(); }
 
+/*
+ * pico8_console_load(path) — load a cartridge.
+ *
+ * Loads the cart and remembers its path and its name.  The path is set
+ * before the cart runs, because the code of the cart may call run() or
+ * load() itself, and those need to know which cart is the current one.
+ *
+ * A plain .p8 cart keeps its text, so that the command "save" can write
+ * it back unchanged.
+ *
+ * 카트를 불러오고 경로와 이름을 기억한다. 경로는 카트가 돌기 전에 정해야
+ * 한다. 카트의 코드가 스스로 run()이나 load()를 부를 수 있고, 그것들은
+ * 현재 카트가 무엇인지 알아야 하기 때문이다.
+ *
+ * 평범한 .p8 카트는 텍스트를 보관한다. 그래야 "save" 명령이 그것을 그대로
+ * 다시 쓸 수 있다.
+ */
 int pico8_console_load(const char *path)
 {
     if (!path)
@@ -432,8 +654,19 @@ static const char *kCommands[] = {
     NULL
 };
 
+/* The two help functions call each other, so one of them needs a forward
+ * declaration.  두 도움말 함수가 서로를 부르므로 둘 중 하나는 미리 선언해야
+ * 한다. */
 static void cmd_help_topic(const std::string &topic);
 
+/*
+ * cmd_help(topic) — the help of the shell.
+ *
+ * Without a topic it lists the commands of the shell, with one it goes
+ * to that topic.
+ *
+ * 주제가 없으면 셸의 명령 목록을 보여주고, 있으면 그 주제로 간다.
+ */
 static void cmd_help(const std::string &topic)
 {
     if (!topic.empty()) { cmd_help_topic(topic); return; }
@@ -452,6 +685,16 @@ static void cmd_help(const std::string &topic)
     print("press esc to toggle editor view", COL_DIM);
 }
 
+/*
+ * cmd_help_topic(topic) — the help of one subject.
+ *
+ * Lists the functions of one part of the API: gfx, audio, input, data,
+ * math, system or lua.  The topic is not case sensitive, and an unknown
+ * topic gives an error.
+ *
+ * API의 한 부분에 대한 함수들을 보여준다: gfx, audio, input, data, math,
+ * system, lua. 주제는 대소문자를 가리지 않고, 모르는 주제는 오류다.
+ */
 static void cmd_help_topic(const std::string &topic)
 {
     std::string t = lower(topic);
@@ -497,6 +740,14 @@ static void cmd_help_topic(const std::string &topic)
     }
 }
 
+/*
+ * cmd_dir(arg) — the list of the cartridges.
+ *
+ * Lists the directory: the subfolders and the cartridges in it.  The
+ * hidden files are left out, and the list is sorted.
+ *
+ * 디렉터리의 내용을 보여준다. 서브폴더와 카트만, 숨은 파일은 빼고, 정렬해서.
+ */
 static void cmd_dir(const std::string &arg)
 {
     std::string dir = arg.empty() ? "." : arg;
@@ -535,6 +786,14 @@ static void cmd_dir(const std::string &arg)
     print(std::to_string(names.size()) + " item(s)", COL_DIM);
 }
 
+/*
+ * cmd_cd(arg) — change the folder.
+ *
+ * Changes the working directory of the program.  Without an argument it
+ * prints the current one.
+ *
+ * 프로그램의 작업 디렉터리를 바꾼다. 인자가 없으면 현재 위치를 보여준다.
+ */
 static void cmd_cd(const std::string &arg)
 {
     if (arg.empty()) {
@@ -548,6 +807,15 @@ static void cmd_cd(const std::string &arg)
     }
 }
 
+/*
+ * cmd_load(arg) — load a cartridge.
+ *
+ * Loads the named cartridge, or loads the running one again when there is
+ * no name.
+ *
+ * 이름을 준 카트를 불러오고, 이름이 없으면 지금 올라와 있는 카트를 다시
+ * 불러온다.
+ */
 static void cmd_load(const std::string &arg)
 {
     if (arg.empty()) {
@@ -571,6 +839,15 @@ static void cmd_load(const std::string &arg)
     }
 }
 
+/*
+ * cmd_save(arg) — save the cartridge.
+ *
+ * Writes the cart to a file.  A plain .p8 cart is written with the text
+ * it was loaded from, so the header and the label survive the round trip.
+ *
+ * 카트를 파일로 쓴다. 평범한 .p8 카트는 불러왔을 때의 텍스트 그대로 쓰므로
+ * 헤더와 라벨이 그대로 살아남는다.
+ */
 static void cmd_save(const std::string &arg)
 {
     if (!g_has_cart) { print_error("save: no cartridge loaded"); return; }
@@ -601,6 +878,15 @@ static void cmd_save(const std::string &arg)
     print_info("saved " + out);
 }
 
+/*
+ * cmd_run(arg) — run a cartridge.
+ *
+ * Loads the named cartridge (or keeps the one that is loaded) and asks the
+ * host to start it.
+ *
+ * 이름을 준 카트를 불러오거나(없으면 지금 올라온 카트를 그대로 두고) 호스트에
+ * 실행을 요청한다.
+ */
 static void cmd_run(const std::string &arg)
 {
     if (!arg.empty()) {
@@ -615,23 +901,54 @@ static void cmd_run(const std::string &arg)
     pico8_console_request_run = 1;
 }
 
+/*
+ * cmd_stop() — stop the cartridge.
+ *
+ * There is no cartridge running in the shell, so this only says so.
+ *
+ * 셸에서는 카트가 돌고 있지 않으므로 그것만 알려 준다.
+ */
 static void cmd_stop(void)
 {
     print("stop: no cartridge is running", COL_TEXT);
 }
 
+/*
+ * cmd_resume() — continue the cartridge.
+ *
+ * Asks the host to start the cart that is loaded.
+ *
+ * 호스트에 지금 올라온 카트를 시작하라고 요청한다.
+ */
 static void cmd_resume(void)
 {
     if (!g_has_cart) { print_error("no cartridge loaded"); return; }
     pico8_console_request_run = 1;
 }
 
+/*
+ * cmd_reset() — the RESET of PICO-8.
+ *
+ * Puts the runtime state of the machine (the RAM from 0x5f00 to 0x5f7f)
+ * back to its default.
+ *
+ * 기계의 런타임 상태(RAM의 0x5f00~0x5f7f)를 기본값으로 되돌린다.
+ */
 static void cmd_reset(void)
 {
     /* PICO-8's RESET restores the runtime draw state (RAM 0x5f00..0x5f7f). */
     pico8_reset_draw_state();
 }
 
+/*
+ * open_in_file_manager(dir) — show a folder in the file manager.
+ *
+ * Opens the folder with the file manager of the system: the Explorer on
+ * Windows, the Finder on macOS and the desktop handler on Linux.
+ *
+ * 시스템의 파일 관리자로 폴더를 연다. Windows는 Explorer, macOS는 Finder,
+ * Linux는 데스크톱 핸들러다.
+ */
 static void open_in_file_manager(const std::string &dir)
 {
 #if defined(_WIN32)
@@ -644,12 +961,28 @@ static void open_in_file_manager(const std::string &dir)
     system(cmd.c_str());
 }
 
-/* Public entry used by extcmd("folder"): open the current working directory. */
+/*
+ * pico8_console_open_folder() — show the current folder.
+ *
+ * The entry point of the command extcmd("folder").
+ *
+ * extcmd("folder") 명령의 진입점.
+ */
 void pico8_console_open_folder(void)
 {
     open_in_file_manager(".");
 }
 
+/*
+ * cmd_folder(arg) — the folders of PICO-8.
+ *
+ * Shows one of the folders that PICO-8 knows: the backups, the desktop,
+ * the configuration or the BBS.  Without an argument it shows the current
+ * directory.
+ *
+ * PICO-8이 아는 폴더를 보여준다: 백업, 데스크톱, 설정, BBS. 인자가 없으면 현재
+ * 디렉터리를 보여준다.
+ */
 static void cmd_folder(const std::string &arg)
 {
     std::string loc = lower(arg);
@@ -675,8 +1008,17 @@ static void cmd_folder(const std::string &arg)
     }
 }
 
-/* List/invoke items registered with menuitem(). PICO-8 shows these in its
-   pause menu; here the shell acts as the pause menu. */
+/*
+ * cmd_menu(arg) — the entries of the pause menu.
+ *
+ * Lists the entries that the cart registered with menuitem(), or runs the
+ * one with the given number.  PICO-8 shows these in its pause menu; here
+ * the shell takes that place.
+ *
+ * 카트가 menuitem()으로 등록한 항목을 보여주거나, 번호를 주면 그 항목을
+ * 실행한다. PICO-8은 일시정지 메뉴에 이것들을 보여주지만, 여기서는 셸이 그
+ * 역할을 한다.
+ */
 static void cmd_menu(const std::string &arg)
 {
     if (pico8_menuitem_count() == 0) {
@@ -700,14 +1042,31 @@ static void cmd_menu(const std::string &arg)
     pico8_vm_call_menuitem(idx, 0);
 }
 
+/*
+ * cmd_mkdir(arg) — make a folder.
+ *
+ * Creates a directory.
+ *
+ * 디렉터리를 만든다.
+ */
 static void cmd_mkdir(const std::string &arg)
 {
     if (arg.empty()) { print_error("usage: mkdir <name>"); return; }
     if (mkdir(arg.c_str(), 0777) != 0)
-        print_error("mkdir: cannot create " + arg);    else
+        print_error("mkdir: cannot create " + arg);
+    else
         print_info("created " + arg + "/");
 }
 
+/*
+ * cmd_backup() — a copy of the cartridge.
+ *
+ * Writes the source of the cart into the folder "backup", so that the
+ * original is not lost when the cart is saved again.
+ *
+ * 카트의 소스를 "backup" 폴더에 써서, 카트를 다시 저장해도 원본이 사라지지
+ * 않게 한다.
+ */
 static void cmd_backup(void)
 {
     if (!g_has_cart) { print_error("backup: no cartridge loaded"); return; }
@@ -724,6 +1083,15 @@ static void cmd_backup(void)
     print_info("backed up " + out);
 }
 
+/*
+ * cmd_config(key, val) — the settings.
+ *
+ * Without a key it lists the settings that PICO-8 has.  pico-c keeps them
+ * for the session only and does not write a config.txt.
+ *
+ * 키가 없으면 PICO-8이 가진 설정들을 보여준다. pico-c는 이 설정을 그
+ * 세션 동안에만 기억하고 config.txt를 쓰지 않는다.
+ */
 static void cmd_config(const std::string &key, const std::string &val)
 {
     if (key.empty()) {
@@ -741,6 +1109,15 @@ static void cmd_config(const std::string &key, const std::string &val)
         print("set " + key + " to " + val + " (session only)", COL_TEXT);
 }
 
+/*
+ * cmd_info() — what is loaded.
+ *
+ * Shows the name of the cart, how many characters and lines its source
+ * has, and which version of PICO-8 pico-c aims at.
+ *
+ * 불러와 있는 카트의 이름, 소스의 글자 수와 줄 수, 그리고 pico-c가 겨냥하는
+ * PICO-8의 버전을 보여준다.
+ */
 static void cmd_info(void)
 {
     if (!g_has_cart) {
@@ -766,6 +1143,14 @@ static void cmd_info(void)
 /*  Tab completion                                                     */
 /* ------------------------------------------------------------------ */
 
+/*
+ * complete_files(prefix) — the cartridges that start with that.
+ *
+ * The names of the cartridges in the current directory that begin with the
+ * given text, sorted.
+ *
+ * 현재 디렉터리에서 주어진 글자로 시작하는 카트의 이름. 정렬되어 있다.
+ */
 static std::vector<std::string> complete_files(const std::string &prefix)
 {
     std::vector<std::string> out;
@@ -783,6 +1168,16 @@ static std::vector<std::string> complete_files(const std::string &prefix)
     return out;
 }
 
+/*
+ * complete_input() — the tab key.
+ *
+ * Finishes what has been typed.  Without a space in the line it completes
+ * the command, with one it completes the file name.  A single match is
+ * put into the line, several matches are listed.
+ *
+ * 입력한 것을 완성한다. 줄에 공백이 없으면 명령을, 있으면 파일 이름을
+ * 완성한다. 후보가 하나면 줄에 채우고, 여러 개면 목록을 보여준다.
+ */
 static void complete_input(void)
 {
     std::string in = g_input;
@@ -828,6 +1223,16 @@ static void complete_input(void)
 /*  Input                                                              */
 /* ------------------------------------------------------------------ */
 
+/*
+ * cmd_edit(arg) — edit the cartridge.
+ *
+ * Writes the cart to a file, opens it in the editor of the $EDITOR
+ * environment variable (vi when there is none) and loads it again
+ * afterwards.
+ *
+ * 카트를 파일로 써서 $EDITOR 환경 변수가 가리키는 편집기(없으면 vi)에서
+ * 연 다음, 편집이 끝나면 다시 불러온다.
+ */
 static void cmd_edit(const std::string &arg)
 {
     (void)arg;
@@ -874,6 +1279,15 @@ static void cmd_edit(const std::string &arg)
     }
 }
 
+/*
+ * cmd_keyconfig() — the buttons.
+ *
+ * PICO-8 lets the player choose the buttons.  pico-c does not keep that
+ * choice, so this only says so.
+ *
+ * PICO-8은 플레이어가 버튼을 고르게 한다. pico-c는 그 선택을 저장하지
+ * 않으므로 그것만 알려 준다.
+ */
 static void cmd_keyconfig(void)
 {
     print_info("keyconfig");
@@ -881,12 +1295,30 @@ static void cmd_keyconfig(void)
     print("use POKE(0x5f2d,...) and host key bindings", COL_DIM);
 }
 
+/*
+ * cmd_splore() — the cart browser.
+ *
+ * PICO-8 can browse the carts of the internet.  pico-c has no network, so
+ * this says so and points at the local carts.
+ *
+ * PICO-8은 인터넷의 카트를 볼 수 있다. pico-c에는 네트워크가 없으므로
+ * 그것을 말하고 로컬 카트를 가리킨다.
+ */
 static void cmd_splore(void)
 {
     print("splore: online cart browser is not available in pico-c", COL_TEXT);
     print("use 'load' with local .p8/.p8.png files", COL_DIM);
 }
 
+/*
+ * cmd_import_shell(arg) — import a cart.
+ *
+ * PICO-8 can import a cart from the BBS.  pico-c cannot, so this only
+ * says so.
+ *
+ * PICO-8은 BBS에서 카트를 가져올 수 있다. pico-c는 할 수 없으므로
+ * 그것을 말할 뿐이다.
+ */
 static void cmd_import_shell(const std::string &arg)
 {
     if (arg.empty()) {
@@ -897,6 +1329,15 @@ static void cmd_import_shell(const std::string &arg)
     print("use a .p8 or .p8.png cart instead", COL_DIM);
 }
 
+/*
+ * cmd_export_shell(arg) — export a cart.
+ *
+ * PICO-8 can send a cart to the BBS.  pico-c cannot, so this only says
+ * so and points at the command "save".
+ *
+ * PICO-8은 카트를 BBS로 보낼 수 있다. pico-c는 할 수 없으므로 그것을
+ * 말하고 "save" 명령을 가리킨다.
+ */
 static void cmd_export_shell(const std::string &arg)
 {
     if (arg.empty()) {
@@ -907,6 +1348,15 @@ static void cmd_export_shell(const std::string &arg)
     print("use 'save <name>' to write a .p8 or .p8.png cart", COL_DIM);
 }
 
+/*
+ * tokenize(s) — the words of a command line.
+ *
+ * Splits the line at the spaces.  A word in quotes is one word, whatever
+ * it holds.
+ *
+ * 공백을 기준으로 줄을 나눈다. 따옴표로 감싼 것은 안에 뭐가 있든 한 단어로
+ * 본다.
+ */
 static std::vector<std::string> tokenize(const std::string &s)
 {
     std::vector<std::string> t;
@@ -927,6 +1377,18 @@ static std::vector<std::string> tokenize(const std::string &s)
     return t;
 }
 
+/*
+ * execute(raw) — run one command line.
+ *
+ * Runs a line of the shell.  The known commands do their work, and
+ * anything else is Lua that is evaluated in the console exactly like
+ * PICO-8 does it.  A line that starts with a question mark is a
+ * shorthand for print(...).
+ *
+ * 셸의 한 줄을 실행한다. 알려진 명령은 그 일을 하고, 그 외의 것은 PICO-8과
+ * 똑같이 셸에서 Lua로 계산된다. 물음표로 시작하는 줄은 print(...)의 줄여
+ * 쓰기다.
+ */
 static void execute(const std::string &raw)
 {
     std::vector<std::string> tok = tokenize(raw);
@@ -977,14 +1439,29 @@ static void execute(const std::string &raw)
     }
 }
 
-/* Run a shell command line on behalf of a Lua function (e.g. mkdir("x"),
-   cd("dir"), dir(), help()). This is how PICO-8 exposes its shell commands to
-   cartridges. */
+/*
+ * pico8_console_exec(line) — a command from a cart.
+ *
+ * Runs a shell command on behalf of a cart, which is how PICO-8 gives its
+ * shell commands to the cartridges (mkdir("x"), cd("dir"), dir(), help()).
+ *
+ * 카트를 대신해서 셸 명령을 실행한다. PICO-8이 셸 명령을 카트에 주는 방법이다
+ * (mkdir("x"), cd("dir"), dir(), help()).
+ */
 void pico8_console_exec(const char *line)
 {
     execute(line ? line : "");
 }
 
+/*
+ * submit() — the enter key.
+ *
+ * Takes what was typed, puts it into the scrollback and into the history,
+ * and runs it.  The same line is not put into the history twice.
+ *
+ * 입력한 것을 스크롤백과 히스토리에 넣고 실행한다. 같은 줄은 히스토리에
+ * 두 번 들어가지 않는다.
+ */
 static void submit(void)
 {
     std::string raw = trim(g_input);
@@ -1001,6 +1478,16 @@ static void submit(void)
     execute(raw);
 }
 
+/*
+ * hist_prev() — the up arrow.
+ *
+ * Goes back through the history.  The first time the line that was being
+ * typed is kept aside, so that it comes back when the arrow is pressed
+ * down again.
+ *
+ * 히스토리에서 뒤로 간다. 처음에는 입력하던 줄을 따로 빼 두므로, 아래
+ * 화살표를 누르면 그 줄이 돌아온다.
+ */
 static void hist_prev(void)
 {
     if (g_history.empty()) return;
@@ -1013,6 +1500,14 @@ static void hist_prev(void)
     g_input = g_history[g_hist_pos];
 }
 
+/*
+ * hist_next() — the down arrow.
+ *
+ * Goes forward through the history.  Past the newest entry the line that
+ * was being typed comes back.
+ *
+ * 히스토리에서 앞으로 간다. 가장 최근 항목을 넘으면 빼 두었던 줄이 돌아온다.
+ */
 static void hist_next(void)
 {
     if (g_hist_pos == -1) return;
@@ -1025,6 +1520,16 @@ static void hist_next(void)
     }
 }
 
+/*
+ * pico8_console_shell_text(utf8) — the text that was typed.
+ *
+ * Puts the typed characters into the input line.  Only the plain ASCII
+ * letters and digits are taken; the other characters belong to the
+ * cartridge's own font and are not part of the shell.
+ *
+ * 입력한 문자를 입력 줄에 넣는다. 평범한 ASCII 문자만 받는다. 나머지 문자는
+ * 카트 고유의 글씨라 셸의 것이 아니다.
+ */
 void pico8_console_shell_text(const char *utf8)
 {
     if (!utf8) return;
@@ -1035,6 +1540,18 @@ void pico8_console_shell_text(const char *utf8)
     }
 }
 
+/*
+ * pico8_console_shell_key(key) — a key that was pressed.
+ *
+ * Acts on the keys the shell uses: enter runs the line, backspace deletes
+ * a character, escape clears the line (or leaves the shell when the line
+ * is already empty), the arrow keys walk through the history and the tab
+ * key completes.
+ *
+ * 셸이 쓰는 키를 처리한다. 엔터는 줄을 실행하고, 백스페이스는 한 글자를
+ * 지우고, esc는 줄을 비우며(비어 있으면 셸을 나간다), 방향키는 히스토리를
+ * 오가고, 탭은 완성한다.
+ */
 void pico8_console_shell_key(int key)
 {
     switch (key) {

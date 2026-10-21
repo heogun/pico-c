@@ -107,18 +107,49 @@ static float  music_fade_step   = 0.0f;
 /*  SFX decoding                                                       */
 /* ------------------------------------------------------------------ */
 
+/*
+ * ram_byte(addr) — one byte of the RAM.
+ *
+ * Reads a byte of the machine, and gives 0 for an address that is outside
+ * of it, so that a broken sound effect cannot read past the end.
+ *
+ * 기계의 RAM 바이트 하나를 읽는다. 범위 밖의 주소는 0을 주므로, 망가진
+ * 효과음이 메모리 끝을 넘어 읽지 못한다.
+ */
 static int ram_byte(int addr)
 {
     if (addr < 0 || addr >= PICO8_RAM_SIZE) return 0;
     return pico8_ram[addr];
 }
 
+/*
+ * sfx_speed(sfx_id) — how fast a sound effect plays.
+ *
+ * The speed is the byte 65 of the sound effect in the RAM.  It says how
+ * long a note lasts; the speed has to be between 1 and 255, and a value of
+ * zero is read as 1.
+ *
+ * 속도는 RAM에 있는 효과음의 65번째 바이트다. 음표가 얼마나 오래 가는지를
+ * 말하며, 1에서 255 사이여야 하고 0은 1로 읽는다.
+ */
 static int sfx_speed(int sfx_id)
 {
     int s = ram_byte(PICO8_SFX_ADDR + sfx_id * AUDIO_SFX_SIZE + 65);
     return s < 1 ? 1 : s;              /* speed must be 1..255 */
 }
 
+/*
+ * sfx_get_note(sfx_id, note, out) — one note of a sound effect.
+ *
+ * A note takes two bytes in the RAM.  The first one holds the pitch (the
+ * lower six bits) and the lower two bits of the instrument, the second one
+ * the rest of the instrument, the volume, the effect and the flag that
+ * says whether the waveform is a custom one.
+ *
+ * 음표는 RAM에서 두 바이트를 차지한다. 첫 번째 바이트는 피치(하위 6비트)와
+ * 악기의 하위 두 비트, 두 번째 바이트는 나머지 악기 비트와 음량, 효과, 그리고
+ * 파형이 사용자 정의인지를 말하는 플래그를 든다.
+ */
 static void sfx_get_note(int sfx_id, int note, struct SfxNote *out)
 {
     int base = PICO8_SFX_ADDR + sfx_id * AUDIO_SFX_SIZE + note * 2;
@@ -131,6 +162,16 @@ static void sfx_get_note(int sfx_id, int note, struct SfxNote *out)
     out->effect     = (msb & 0x70) >> 4;
 }
 
+/*
+ * key_to_freq(key) — the frequency of a note.
+ *
+ * PICO-8 numbers its notes from 0 to 63.  The note 33 is the A of 440Hz
+ * and every step is a half tone, so the frequency of a note is 440Hz times
+ * 2 to the power of (key - 33) / 12.
+ *
+ * PICO-8은 음을 0부터 63까지 센다. 음 33이 440Hz의 A이고 한 단계가 반음
+ * 이므로, 음의 주파수는 440Hz에 2의 (key - 33) / 12 제곱을 곱한 값이다.
+ */
 static float key_to_freq(int key)
 {
     return 440.0f * exp2f((key - 33.0f) / 12.0f);
@@ -140,6 +181,26 @@ static float key_to_freq(int key)
 /*  Waveform generation (formulas measured from PICO-8 WAV exports)     */
 /* ------------------------------------------------------------------ */
 
+/*
+ * pico8_wave(instrument, advance, freq, noise_state, key) — one sample.
+ *
+ * Makes the waveform of the given instrument.  The `advance` is the phase
+ * of the note in cycles, and the fractional part of it is what the
+ * waveform is built from.  The eight instruments of PICO-8 are a
+ * triangle, a tilted sawtooth, a sawtooth, a long square, a short square,
+ * an organ, noise and a phaser.
+ *
+ * The noise instrument keeps its state in `noise_state`, because the noise
+ * is a filter that remembers the last sample.  A higher key makes the
+ * noise brighter.
+ *
+ * 주어진 악기의 파형을 만든다. `advance`는 음의 위상(사이클 수)이고, 그
+ * 소수 부분으로 파형이 만들어진다. PICO-8의 여덟 악기는 삼각파, 기울인 톱니파,
+ * 톱니파, 긴 제곱파, 짧은 제곱파, 오르간, 노이즈, 페이저다.
+ *
+ * 노이즈 악기는 `noise_state`에 상태를 남긴다. 노이즈가 마지막 샘플을 기억하는
+ * 필터이기 때문이다. 높은 음은 노이즈를 더 밝게 만든다.
+ */
 static float pico8_wave(int instrument, double advance, float freq,
                         float *noise_state, int key)
 {
@@ -197,8 +258,29 @@ static float pico8_wave(int instrument, double advance, float freq,
 /*  Per-channel sfx update                                             */
 /* ------------------------------------------------------------------ */
 
-/* Advance one channel by a single output sample and return the synth
-   parameters for that sample. */
+/*
+ * update_sfx_state(ch, param, inv_sr) — advance a channel by one sample.
+ *
+ * Moves the channel one output sample forward and fills in the parameters
+ * of the synthesizer for that sample: the instrument, the frequency, the
+ * volume and the phase.
+ *
+ * The effects of a note are applied here as well: the slide, the
+ * vibrato, the drop, the two fades and the two arpeggios.  The phase is
+ * kept in the channel, so it runs on over the notes.
+ *
+ * The channel also decides when the sound is over: at the end of the
+ * notes, at the loop end, or at the length that the caller gave.
+ *
+ * 채널을 출력 샘플 하나만큼 앞으로 보내고, 그 샘플의 신디사이저 파라미터(악기,
+ * 주파수, 음량, 위상)를 채운다.
+ *
+ * 음의 효과도 여기서 적용된다. slide, vibrato, drop, 두 개의 fade, 두 개의
+ * arp. 위상은 채널이 들고 있으므로 음이 바뀌어도 이어진다.
+ *
+ * 채널은 소리가 언제 끝나는지도 정한다. 음표의 끝, 루프 끝, 아니면 호출한 쪽이
+ * 준 길이에서 끝난다.
+ */
 static void update_sfx_state(struct Channel *ch, struct SynthParam *param,
                              float inv_sr)
 {
@@ -319,19 +401,59 @@ static void update_sfx_state(struct Channel *ch, struct SynthParam *param,
 /*  Music sequencing                                                   */
 /* ------------------------------------------------------------------ */
 
-static void set_music_pattern(int pattern);
-
+/*
+ * song_sfx(song, channel) — the sound effect of a channel of a song.
+ *
+ * The four bytes of a song hold one sound effect per channel.  The upper
+ * bit of the byte is a flag and the rest is the number of the effect.
+ *
+ * song의 네 바이트는 채널마다 효과음 하나를 가리킨다. 바이트의 최상위 비트는
+ * 플래그이고 나머지는 효과음 번호다.
+ */
 static int song_sfx(int song, int channel)
 {
     return ram_byte(PICO8_SONG_ADDR + song * AUDIO_SONG_SIZE + channel) & 0x7f;
 }
 
+/*
+ * song_flag(song, which) — one of the flags of a song.
+ *
+ * The flags of a song live in the upper bits of its four channel bytes:
+ * the first one is "next" (the pattern that follows this one), the second
+ * "loop" and the third "stop".
+ *
+ * song의 플래그는 채널 바이트들의 최상위 비트에 있다. 첫 번째는 "다음"(이
+ * 패턴 다음에 오는 패턴), 두 번째는 "반복", 세 번째는 "정지"다.
+ */
 static int song_flag(int song, int which)
 {
     /* which: 0 = fnext (chan0), 1 = loop/end (chan1), 2 = stop (chan2) */
     return (ram_byte(PICO8_SONG_ADDR + song * AUDIO_SONG_SIZE + which) >> 7) & 1;
 }
 
+/*
+ * set_music_pattern(pattern) — start a song pattern.
+ *
+ * Starts the given song pattern.  Every channel that plays music is
+ * stopped and the channels of the new pattern are started; a channel that
+ * is busy with something else remembers the effect and starts it as soon
+ * as it is free.
+ *
+ * A pattern of -1 stops the music.
+ *
+ * The length of the pattern is worked out from its channels: the first
+ * channel that does not loop decides it, and if every channel loops the
+ * slowest one does.
+ *
+ * 주어진 song 패턴을 시작한다. 음악을 담당하는 채널은 모두 멈추고 새 패턴의
+ * 채널들을 시작한다. 다른 것으로 바쁜 채널은 효과음을 기억해 두었다가 채널이
+ * 비면 시작한다.
+ *
+ * 패턴이 -1이면 음악을 멈춘다.
+ *
+ * 패턴의 길이는 그 채널들로부터 계산한다. 반복하지 않는 첫 채널이 정하고,
+ * 모든 채널이 반복하면 가장 느린 채널이 정한다.
+ */
 static void set_music_pattern(int pattern)
 {
     for (int n = 0; n < AUDIO_NUM_CHANS; n++) {
@@ -410,6 +532,24 @@ static void set_music_pattern(int pattern)
 /*  Mixing                                                             */
 /* ------------------------------------------------------------------ */
 
+/*
+ * fill_buffer(buf, samples) — make the next samples of the sound.
+ *
+ * Fills the buffer of the host with the mixed output of the four
+ * channels.  The music timeline moves forward here as well, and when a
+ * pattern is over the next one is started (or the music loops or stops,
+ * as the flags of the song say).
+ *
+ * The mix is cut off at -1 and 1, so that a loud cart cannot produce
+ * anything outside of the range of the host.
+ *
+ * 호스트의 버퍼를 네 채널의 합친 출력으로 채운다. 음악의 시간표도 여기서
+ * 앞으로 가고, 패턴이 끝나면 다음 패턴을 시작한다(song의 플래그가 말하는 대로
+ * 반복하거나 멈춘다).
+ *
+ * 합은 -1과 1 사이로 잘라내므로, 시끄러운 카트가 호스트의 범위를 벗어난 소리를
+ * 만들 수 없다.
+ */
 static void fill_buffer(float *buf, int samples)
 {
     memset(buf, 0, (size_t)samples * sizeof(float));
@@ -501,6 +641,14 @@ static void fill_buffer(float *buf, int samples)
     }
 }
 
+/*
+ * audio_callback(userdata, stream, len) — the callback of SDL.
+ *
+ * The callback that SDL calls when it wants sound.  It only fills the
+ * buffer that SDL gave.
+ *
+ * SDL이 소리를 원할 때 부르는 콜백이다. SDL이 준 버퍼를 채우는 것뿐이다.
+ */
 static void audio_callback(void *userdata, Uint8 *stream, int len)
 {
     (void)userdata;
@@ -511,6 +659,15 @@ static void audio_callback(void *userdata, Uint8 *stream, int len)
 /*  Public API                                                         */
 /* ------------------------------------------------------------------ */
 
+/*
+ * pico8_audio_init() — open the sound card.
+ *
+ * Opens the device of SDL at 44100Hz, mono, with a buffer of 1024 samples,
+ * and starts it right away.  A device that cannot be opened gives -1.
+ *
+ * SDL의 장치를 44100Hz, 모노, 1024샘플 버퍼로 열고 곧바로 재생하기 시작한다.
+ * 열 수 없는 장치는 -1을 준다.
+ */
 int pico8_audio_init(void)
 {
     SDL_AudioSpec want, have;
@@ -531,6 +688,13 @@ int pico8_audio_init(void)
     return 0;
 }
 
+/*
+ * pico8_audio_destroy() — close the sound card.
+ *
+ * Closes the device of SDL, if there is one.
+ *
+ * SDL의 장치를 닫는다. 열려 있다면.
+ */
 void pico8_audio_destroy(void)
 {
     if (audio_dev) {
@@ -540,9 +704,45 @@ void pico8_audio_destroy(void)
     }
 }
 
+/*
+ * lock_audio() — keep the mixer out.
+ *
+ * Locks the device of SDL, so that the audio thread does not change the
+ * channels while they are being set up.
+ *
+ * SDL의 장치를 잠근다. 설정하는 동안 오디오 스레드가 채널을 바꾸지 못하게.
+ */
 static void lock_audio(void)   { if (audio_dev) SDL_LockAudioDevice(audio_dev); }
+
+/*
+ * unlock_audio() — let the mixer in again.
+ *
+ * Unlocks the device of SDL.
+ *
+ * SDL의 장치를 다시 연다.
+ */
 static void unlock_audio(void) { if (audio_dev) SDL_UnlockAudioDevice(audio_dev); }
 
+/*
+ * pico8_audio_sfx(sfx_id, channel, offset, length) — play a sound effect.
+ *
+ * Starts a sound effect on a channel.  The special numbers of `sfx_id`
+ * mean something else: -1 stops the sound effects, -2 stops their
+ * looping.  A channel of -2 says that the sound must not play on any
+ * channel.
+ *
+ * Without a channel of its own the effect looks for a free one (or one
+ * that already plays the same effect), and only takes a channel that is
+ * busy with music when there is nothing else left.  The channel that
+ * plays music is never taken away from the music.
+ *
+ * `sfx_id`의 특별한 값은 다른 뜻을 갖는다. -1은 효과음을 멈추고, -2는 반복을
+ * 멈춘다. 채널이 -2이면 어느 채널에서도 나오지 않게 한다.
+ *
+ * 채널을 따로 주지 않으면 빈 채널(또는 같은 효과음을 이미 연주하고 있는 채널)을
+ * 찾고, 그것도 없으면 음악에 쓰이는 채널만 가져온다. 음악 채널은 음악에서
+ * 뺏지 않는다.
+ */
 void pico8_audio_sfx(int sfx_id, int channel, int offset, int length)
 {
     lock_audio();
@@ -623,6 +823,22 @@ void pico8_audio_sfx(int sfx_id, int channel, int offset, int length)
     unlock_audio();
 }
 
+/*
+ * pico8_audio_music(song_id, fade_len, channel_mask) — play a song.
+ *
+ * Starts a song.  The mask says which of the four channels the song may
+ * use; a channel that is not in the mask is left alone.
+ *
+ * A fade length of zero starts the song at full volume, a larger one
+ * fades it in over that many milliseconds.  A song of -1 stops the music,
+ * and a fade length with it fades the music out first.
+ *
+ * song을 시작한다. 마스크는 song이 어느 채널을 쓸 수 있는지 말하고, 마스크에
+ * 없는 채널은 건드리지 않는다.
+ *
+ * fade 길이가 0이면 최대 음량으로 시작하고, 그보다 크면 그 밀리초에 걸쳐
+ * 소리를 올린다. song이 -1이면 음악을 멈추고, fade 길이를 주면 먼저 지운다.
+ */
 void pico8_audio_music(int song_id, int fade_len, int channel_mask)
 {
     lock_audio();
@@ -649,6 +865,13 @@ void pico8_audio_music(int song_id, int fade_len, int channel_mask)
     unlock_audio();
 }
 
+/*
+ * pico8_audio_stop() — silence everything.
+ *
+ * Stops every channel and the music.
+ *
+ * 모든 채널과 음악을 멈춘다.
+ */
 void pico8_audio_stop(void)
 {
     lock_audio();
@@ -663,12 +886,28 @@ void pico8_audio_stop(void)
     unlock_audio();
 }
 
+/*
+ * pico8_audio_sfx_id(channel) — what a channel is playing.
+ *
+ * The number of the sound effect on the channel, or -1 when the channel is
+ * free.
+ *
+ * 그 채널에서 나오는 효과음 번호. 채널이 비어 있으면 -1.
+ */
 int pico8_audio_sfx_id(int channel)
 {
     if (channel < 0 || channel >= AUDIO_NUM_CHANS) return -1;
     return channels[channel].sfx;
 }
 
+/*
+ * pico8_audio_note_num(channel) — which note a channel is on.
+ *
+ * The number of the note the channel is playing, counted from 0.  A
+ * channel that plays nothing gives -1.
+ *
+ * 그 채널이 연주 중인 음 번호(0부터). 아무것도 연주하지 않으면 -1.
+ */
 int pico8_audio_note_num(int channel)
 {
     if (channel < 0 || channel >= AUDIO_NUM_CHANS) return -1;
@@ -679,11 +918,44 @@ int pico8_audio_note_num(int channel)
     return n;
 }
 
+/*
+ * pico8_audio_music_pattern() — the song that is playing.
+ *
+ * The number of the pattern the music is on, or -1 when there is no
+ * music.
+ *
+ * 음악이 있는 패턴 번호. 음악이 없으면 -1.
+ */
 int pico8_audio_music_pattern(void) { return music_pattern; }
+
+/*
+ * pico8_audio_music_count() — how many patterns the song has played.
+ *
+ * The number of patterns the music has gone through since it started.
+ *
+ * 음악이 시작된 뒤 지나온 패턴의 수.
+ */
 int pico8_audio_music_count(void)   { return music_count; }
+
+/*
+ * pico8_audio_music_ticks() — where the music is.
+ *
+ * The number of ticks the current pattern has been playing for, or -1
+ * when there is no music.
+ *
+ * 현재 패턴이 얼마나 재생되었는지(틱 수). 음악이 없으면 -1.
+ */
 int pico8_audio_music_ticks(void)
 {
     if (music_pattern < 0) return -1;
     return (int)music_offset;
 }
+
+/*
+ * pico8_audio_music_playing() — is the music running?
+ *
+ * 1 when a song is playing, 0 when there is none.
+ *
+ * song이 재생 중이면 1, 없으면 0.
+ */
 int pico8_audio_music_playing(void) { return music_pattern != -1; }

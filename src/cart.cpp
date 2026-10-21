@@ -46,6 +46,15 @@
  *  Small helpers
  * ------------------------------------------------------------------ */
 
+/*
+ * hex_digit(c) — the value of one hex digit.
+ *
+ * Turns '0'..'9', 'a'..'f' and 'A'..'F' into 0..15.  Anything else is
+ * read as 0, so a broken file does not crash the loader.
+ *
+ * '0'~'9', 'a'~'f', 'A'~'F'를 0~15로 바꾼다. 그 외의 문자는 0으로 읽는다.
+ * 망가진 파일이 로더를 죽이지 않게 하기 위해서다.
+ */
 static inline int hex_digit(int c)
 {
     if (c >= '0' && c <= '9') return c - '0';
@@ -54,7 +63,15 @@ static inline int hex_digit(int c)
     return 0;
 }
 
-/* Read the hex pair at `pos` (bounds-checked, missing digits read as zero). */
+/*
+ * hex_pair(s, len, pos) — the value of two hex digits.
+ *
+ * Reads the pair at `pos` and returns the byte they make.  The read is
+ * bounds checked: a digit that is past the end of the line counts as 0.
+ *
+ * `pos`에 있는 두 자리 16진수를 읽어 그 값(바이트)을 돌려준다. 범위를
+ * 벗어난 자리는 0으로 센다.
+ */
 static int hex_pair(const char *s, size_t len, size_t pos)
 {
     int a = (pos     < len) ? hex_digit((unsigned char)s[pos])     : 0;
@@ -62,13 +79,27 @@ static int hex_pair(const char *s, size_t len, size_t pos)
     return (a << 4) | b;
 }
 
+/*
+ * hex_single(s, len, pos) — the value of one hex digit.
+ *
+ * The low nibble of a byte, read out of the file as one character.
+ *
+ * 바이트의 하위 니블. 파일에서 한 문자로 읽는다.
+ */
 static int hex_single(const char *s, size_t len, size_t pos)
 {
     return (pos < len) ? hex_digit((unsigned char)s[pos]) : 0;
 }
 
-/* Directory part of a path: everything up to and including the last
-   '/' or '\\', or "" when the path has no separator. */
+/*
+ * get_dir(path) — the directory a file lives in.
+ *
+ * Everything up to and including the last '/' or '\\'.  A path without a
+ * separator has no directory, so the result is empty.
+ *
+ * 마지막 '/' 또는 '\\'까지의 부분. 구분자가 없는 경로에는 디렉터리가 없으므로
+ * 결과가 비어 있다.
+ */
 static std::string get_dir(const std::string &path)
 {
     size_t p = path.find_last_of("/\\");
@@ -76,6 +107,16 @@ static std::string get_dir(const std::string &path)
     return path.substr(0, p + 1);
 }
 
+/*
+ * read_whole_file(path, out) — read a file into a string.
+ *
+ * Reads the whole file in binary mode and puts it into `out`.  The file is
+ * opened, its size asked for and then read in one go; a file that cannot
+ * be opened gives false.
+ *
+ * 파일 전체를 바이너리 모드로 읽어 `out`에 넣는다. 파일을 열고 크기를 물은
+ * 다음 한 번에 읽는다. 열 수 없는 파일은 false를 준다.
+ */
 static bool read_whole_file(const char *path, std::string &out)
 {
     FILE *f = fopen(path, "rb");
@@ -114,6 +155,17 @@ static uint8_t     g_cart_rom[PICO8_CART_DATA_SIZE];
    cart's stamp is written back unchanged. */
 static uint8_t     g_cart_logo[32];
 
+/*
+ * cart_snapshot_rom() — remember the data area of the cart.
+ *
+ * Takes a copy of the 0x4300 bytes of the data area as they are right
+ * after the cart was loaded.  reload() copies them back into the RAM, so
+ * this is the picture of the cart on disk and not of the running cart.
+ *
+ * 카트를 방금 불러온 직후의 데이터 영역 0x4300바이트를 복사해 둔다.
+ * reload()이 이걸 RAM에 다시 복사하므로, 이건 디스크에 있는 카트의 모습이지
+ * 실행 중인 카트의 모습이 아니다.
+ */
 static void cart_snapshot_rom(void)
 {
     memcpy(g_cart_rom, pico8_ram, PICO8_CART_DATA_SIZE);
@@ -128,8 +180,20 @@ static void cart_snapshot_rom(void)
 static const char legacy_lut[] =
     "\n 0123456789abcdefghijklmnopqrstuvwxyz!#%(){}[]<>+=/*:;.,~_";
 
-/* Decompress a legacy ":c:" block (src points at the ":c:\0" header).
-   Returns the length of the produced text (trailing NULs removed). */
+/*
+ * decompress_legacy(src, dest, maxlen) — the old ":c:" compressor.
+ *
+ * The format PICO-8 used before PXA: a header of eight bytes, then a
+ * stream of codes.  A code below 0x3c is a character of the lookup table
+ * (its first entry is a newline, the second a space), a code of 0x3c or
+ * more is a back reference that copies a number of bytes from earlier in
+ * the output, and a code of 0 is a literal byte that follows.
+ *
+ * PXA가 나오기 전에 PICO-8이 쓰던 형식이다. 8바이트 헤더 다음에 코드의
+ * 흐름이 온다. 0x3c보다 작은 코드는 룩업 테이블의 문자(첫 항목은 줄바꿈,
+ * 둘째는 공백)이고, 0x3c 이상인 코드는 앞에서 이미 나온 바이트를 복사하는
+ * 역참조이며, 0은 바로 뒤에 오는 리터럴 바이트다.
+ */
 static int decompress_legacy(const uint8_t *src, uint8_t *dest, uint32_t maxlen)
 {
     uint32_t length = ((uint32_t)src[4] << 8) | src[5];
@@ -161,10 +225,33 @@ static int decompress_legacy(const uint8_t *src, uint8_t *dest, uint32_t maxlen)
     return (int)n;
 }
 
-/* Move-to-front table used by the PXA decompressor. */
+/* Move-to-front table used by the PXA decompressor.
+ *
+ * The table holds the 256 possible bytes in the order they are used.  Every
+ * time a byte is taken out it is moved to the front, so the bytes that keep
+ * coming back end up near the front and are cheap to code.
+ *
+ * PXA 해제기가 쓰는 move-to-front 테이블.
+ *
+ * 테이블은 256개의 가능한 바이트를 사용된 순서로 들고 있다. 바이트를 꺼낼
+ * 때마다 맨 앞으로 옮기므로, 자주 나오는 바이트가 앞쪽에 모이고 싸게
+ * 코딩된다.
+ */
 struct move_to_front {
     uint8_t state[256];
     move_to_front() { for (int i = 0; i < 256; i++) state[i] = (uint8_t)i; }
+
+    /*
+     * get(n) — the byte at the n-th place, moved to the front.
+     *
+     * Takes the byte at position `n` out of the table, moves everything in
+     * front of it one place back and puts the byte at the front.  The byte
+     * that is returned is the one the caller wanted.
+     *
+     * 테이블의 n번째 자리에 있는 바이트를 꺼내, 그 앞의 것들을 한 칸씩
+     * 뒤로 밀고, 그 바이트를 맨 앞에 놓는다. 돌려주는 바이트가 호출한
+     * 쪽이 원하던 것이다.
+     */
     uint8_t get(int n)
     {
         uint8_t ch = state[n];
@@ -174,7 +261,28 @@ struct move_to_front {
     }
 };
 
-/* Decompress a PXA block (src points at the "\0pxa" header). */
+/*
+ * decompress_pxa(src, dest, maxlen) — the PXA compressor.
+ *
+ * The format that PICO-8 uses today.  The header holds the length of the
+ * text and the length of the compressed block; the block itself is a bit
+ * stream of three kinds of item:
+ *
+ *   - a literal character, coded by its position in a move-to-front table
+ *     (a table that is reordered every time a character is used, so that
+ *     the characters that keep coming back become cheap);
+ *   - a run of the same byte, with a length that is coded in groups of
+ *     seven;
+ *   - a literal run of characters that ends with a zero byte.
+ *
+ * 오늘날 PICO-8이 쓰는 형식이다. 헤더에는 텍스트 길이와 압축 블록의 길이가
+ * 들어 있고, 블록은 세 종류의 항목으로 이루어진 비트 스트림이다:
+ *
+ *   - 리터럴 문자. move-to-front 테이블에서의 위치로 코딩된다(사용될 때마다
+ *     순서가 바뀌는 테이블이라 자주 나오는 문자가 싸진다).
+ *   - 같은 바이트의 연속. 길이는 7개 단위로 코딩된다.
+ *   - 0 바이트로 끝나는 리터럴 문자열.
+ */
 static int decompress_pxa(const uint8_t *src, uint8_t *dest, uint32_t maxlen)
 {
     uint32_t length     = ((uint32_t)src[4] << 8) | src[5];
@@ -233,6 +341,20 @@ static int decompress_pxa(const uint8_t *src, uint8_t *dest, uint32_t maxlen)
  *  #include preprocessing
  * ------------------------------------------------------------------ */
 
+/*
+ * preprocess_includes(dir, code, depth) — expand the #include lines.
+ *
+ * PICO-8's carts can pull in other files with a line that starts with
+ * #include and a file name in quotes.  The file is read and its contents
+ * take the place of the line; the directory of the included file becomes
+ * the base for the includes inside it.  The nesting goes up to eleven
+ * levels deep.
+ *
+ * PICO-8 카트는 #include로 시작하는 줄과 따옴표로 감싼 파일 이름으로 다른
+ * 파일을 끌어올 수 있다. 그 파일을 읽어 그 내용이 줄을 대신하고, 포함된
+ * 파일의 디렉터리가 그 안의 include의 기준이 된다. 중첩은 11단계까지
+ * 간다.
+ */
 static std::string preprocess_includes(const std::string &dir,
                                        const std::string &code, int depth)
 {
@@ -287,7 +409,18 @@ static std::string preprocess_includes(const std::string &dir,
  *  .p8 (text) parsing
  * ------------------------------------------------------------------ */
 
-/* Decode one __sfx__ line into the 68-byte RAM representation. */
+/*
+ * parse_sfx_line(line, len, dst) — one __sfx__ line into the RAM.
+ *
+ * A line of the __sfx__ section holds four header bytes (the editor mode,
+ * the speed and the two loop points) and then the 32 notes, five hex
+ * digits each: the pitch, the instrument, the volume and the effect.  The
+ * notes are stored in the RAM in the packed form that the mixer wants.
+ *
+ * __sfx__ 섹션의 한 줄에는 헤더 4바이트(편집기 모드, 속도, 두 루프 지점)와
+ * 그 뒤 32개 음표가 16진수 다섯 자리씩으로 들어 있다. 각각 피치, 악기, 음량,
+ * 효과다. 음표는 믹서가 원하는 압축 형태로 RAM에 저장된다.
+ */
 static void parse_sfx_line(const char *line, size_t len, uint8_t *dst)
 {
     /* Header: 4 bytes from the first 8 hex characters. */
@@ -311,8 +444,18 @@ static void parse_sfx_line(const char *line, size_t len, uint8_t *dst)
     }
 }
 
-/* Decode one __music__ line ("FF c0c1c2c3") into 4 RAM bytes. The flag
-   bits are folded into the top bit of each channel byte. */
+/*
+ * parse_music_line(line, len, dst) — one __music__ line into the RAM.
+ *
+ * A line of the __music__ section reads "FF c0c1c2c3": a byte of flags
+ * and then the four patterns of the channels.  The RAM keeps the three
+ * flags (stop, repeat, next) in the top bit of the first three channel
+ * bytes, and the fourth bit in the top bit of the fourth channel byte.
+ *
+ * __music__ 섹션의 한 줄은 "FF c0c1c2c3" 꼴이다: 플래그 바이트 하나와 채널
+ * 넷의 패턴. RAM에는 세 플래그(stop, repeat, next)가 첫 세 채널 바이트의
+ * 최상위 비트에, 네 번째 플래그가 네 번째 채널 바이트의 최상위 비트에 저장된다.
+ */
 static void parse_music_line(const char *line, size_t len, uint8_t *dst)
 {
     int flag = hex_pair(line, len, 0);
@@ -335,11 +478,22 @@ static void parse_music_line(const char *line, size_t len, uint8_t *dst)
  *  Cartridge size limits (matched against the oracle)
  * ------------------------------------------------------------------ */
 
-/* PICO-8 checks the Lua source when a cart is loaded: more than 65536 bytes
-   and the load fails outright, more than 8192 tokens and the cart is loaded
-   but never run.  Returns -1 when the source is too large, 1 when it has too
-   many tokens (the message is printed here, exactly like the oracle) and 0
-   when the cart may run. */
+/*
+ * check_source_limits(source) — is the source too big?
+ *
+ * PICO-8 checks the Lua source when a cart is loaded: more than 65536
+ * bytes and the load fails outright, more than 8192 tokens and the cart
+ * is loaded but never run.  The message for the second case is printed
+ * here, exactly like the oracle prints it.
+ *
+ *   -1  소스가 너무 크다(불러오기 실패)
+ *    0  실행해도 된다
+ *    1  토큰이 너무 많다(불러왔지만 실행하지 않는다)
+ *
+ * 카트를 불러올 때 PICO-8은 Lua 소스를 검사한다. 65536바이트를 넘으면
+ * 불러오기가 아예 실패하고, 8192 토큰을 넘으면 카트는 불러오되 실행하지
+ * 않는다. 두 번째 경우의 메시지는 오라클과 똑같이 여기서 출력한다.
+ */
 static int check_source_limits(const std::string &source)
 {
     if (source.size() > PICO8_SOURCE_LIMIT)
@@ -359,8 +513,27 @@ static int check_source_limits(const std::string &source)
  *  .p8 text parsing
  * ------------------------------------------------------------------ */
 
-/* Parse a complete .p8 text cart. Fills `cart_data` (a 0x4300 RAM image)
-   and appends the Lua source to `code`. Returns 0 on success. */
+/*
+ * parse_p8_text(text, textlen, cart_data, code) — read a .p8 file.
+ *
+ * Goes over the file line by line and follows the sections: __lua__ is the
+ * source, __gfx__ the sprite sheet, __gff__ the graphics flags, __map__ the
+ * map, __sfx__ the sound effects, __music__ the songs and __label__ the
+ * name of the cart.  The data ends up in `cart_data` (a 0x4300 byte image
+ * of the RAM) and the source in `code`.
+ *
+ * 파일을 한 줄씩 훑으며 섹션을 따라간다. __lua__는 소스, __gfx__는 스프라이트
+ * 시트, __gff__는 그래픽 플래그, __map__는 맵, __sfx__는 효과음, __music__는
+ * song, __label__는 카트 이름이다. 데이터는 `cart_data`(RAM의 0x4300바이트
+ * 이미지)에, 소스는 `code`에 들어간다.
+ *
+ * The songs start out at the "no pattern" marker 0x41,0x42,0x43,0x44, so
+ * that a cart without a __music__ section reports the same values as it
+ * does on a real PICO-8.
+ *
+ * song은 "패턴 없음" 표지 0x41,0x42,0x43,0x44로 시작한다. 그래서
+ * __music__ 섹션이 없는 카트는 실제 PICO-8과 같은 값을 보인다.
+ */
 static int parse_p8_text(const char *text, size_t textlen,
                          uint8_t *cart_data, std::string &code)
 {
@@ -469,6 +642,24 @@ static int parse_p8_text(const char *text, size_t textlen,
  *  .p8.png parsing
  * ------------------------------------------------------------------ */
 
+/*
+ * load_p8png(path) — read a .p8.png file.
+ *
+ * The picture carries the cart: the first 0x4300 pixels are the data area,
+ * the code follows at 0x4300 (compressed with PXA or with the old ":c:"
+ * compressor, or as plain text) and 32 bytes of metadata sit at 0x8000.
+ *
+ * The image is decoded, the two low bits of every colour channel are put
+ * back together into the byte of the cart, the RAM is filled with the data
+ * area and the source is handed to the VM.
+ *
+ * 그림 자체가 카트다. 첫 0x4300 픽셀이 데이터 영역이고, 0x4300부터 코드가
+ * 온다(PXA 또는 옛 ":c:" 압축, 또는 평문). 0x8000에는 32바이트의 메타데이터가
+ * 있다.
+ *
+ * 이미지를 해독하고 색 채널의 하위 두 비트를 카트의 바이트로 다시 합친 뒤,
+ * RAM을 데이터 영역으로 채우고 소스를 VM에 넘긴다.
+ */
 static int load_p8png(const char *path)
 {
     int w = 0, h = 0, comp = 0;
@@ -550,6 +741,17 @@ static int load_p8png(const char *path)
 /* ------------------------------------------------------------------ *
  *  Public entry points
  * ------------------------------------------------------------------ */
+
+/*
+ * load_p8_text(path, text) — load a .p8 file.
+ *
+ * Parses the text, resets the machine, copies the data area into the RAM
+ * and hands the source to the VM.  When the source is too big the cart is
+ * loaded but not run.
+ *
+ * 텍스트를 파싱하고, 기계를 초기화하고, 데이터 영역을 RAM에 복사하고, 소스를
+ * VM에 넘긴다. 소스가 너무 크면 카트는 불러오되 실행하지 않는다.
+ */
 static int load_p8_text(const char *path, const std::string &text)
 {
     uint8_t cart_data[PICO8_CART_DATA_SIZE];
@@ -578,6 +780,15 @@ static int load_p8_text(const char *path, const std::string &text)
     return 0;
 }
 
+/*
+ * pico8_load_cart(path) — load a cart from a file.
+ *
+ * Looks at the first bytes of the file: a PNG signature means a .p8.png
+ * cart, anything else is read as the text of a .p8 cart.
+ *
+ * 파일이 처음 몇 바이트인지 본다. PNG 시그니처면 .p8.png 카트이고, 그 외에는
+ * .p8 카트의 텍스트로 읽는다.
+ */
 int pico8_load_cart(const char *path)
 {
     if (!path) return -1;
@@ -602,6 +813,15 @@ int pico8_load_cart(const char *path)
     return load_p8_text(path, text);
 }
 
+/*
+ * pico8_run_cart(path) — load a cart and start it.
+ *
+ * Loads the cart and calls its _init, so that a cart that is run from the
+ * command line begins the same way it would in the PICO-8.
+ *
+ * 카트를 불러오고 _init을 부른다. 그래서 커맨드 라인에서 실행한 카트가
+ * PICO-8에서 실행될 때와 똑같이 시작한다.
+ */
 int pico8_run_cart(const char *path)
 {
     if (pico8_load_cart(path) != 0)
@@ -616,30 +836,83 @@ int pico8_run_cart(const char *path)
 
 static const char kHexDigits[] = "0123456789abcdef";
 
+/*
+ * pico8_cart_set_source(src, len) — the source of the cart.
+ *
+ * Keeps the raw Lua source of the loaded cart.  A NULL pointer clears it.
+ *
+ * 불러온 카트의 원본 Lua 소스를 보관한다. NULL을 주면 지운다.
+ */
 void pico8_cart_set_source(const char *src, size_t len)
 {
     if (src) g_cart_source.assign(src, len);
     else     g_cart_source.clear();
 }
 
+/*
+ * pico8_cart_source(len) — the source of the cart.
+ *
+ * Returns the source that was kept, and writes its length into `len` when
+ * that pointer is given.
+ *
+ * 보관해 둔 소스를 돌려준다. `len`이 주어지면 그 길이를 써 넣는다.
+ */
 const char *pico8_cart_source(size_t *len)
 {
     if (len) *len = g_cart_source.size();
     return g_cart_source.c_str();
 }
 
+/*
+ * pico8_cart_set_path(path) — where the cart came from.
+ *
+ * The path of the loaded cart, used when a cart is saved without a name
+ * of its own.  A NULL pointer empties it.
+ *
+ * 불러온 카트의 경로. 이름 없이 카트를 저장할 때 쓰인다. NULL을 주면 비운다.
+ */
 void pico8_cart_set_path(const char *path) { g_cart_path = path ? path : ""; }
+
+/*
+ * pico8_cart_get_path() — where the cart came from.
+ *
+ * 불러온 카트의 경로를 돌려준다.
+ */
 const char *pico8_cart_get_path(void)      { return g_cart_path.c_str(); }
+
+/*
+ * pico8_cart_rom() — the data area of the cart.
+ *
+ * The 0x4300 bytes of the cart as they were loaded from disk.  reload()
+ * copies from here and cstore() writes back into it.
+ *
+ * 디스크에서 불러온 그대로의 카트 데이터 영역 0x4300바이트. reload()은
+ * 여기서 복사하고, cstore()는 여기로 쓴다.
+ */
 const uint8_t *pico8_cart_rom(void)        { return g_cart_rom; }
 
+/*
+ * put_hex_byte(out, b) — one byte as two hex digits.
+ *
+ * Adds the byte to the string in lower case hex.
+ *
+ * 바이트를 소문자 16진수 두 자리로 문자열에 붙인다.
+ */
 static void put_hex_byte(std::string &out, uint8_t b)
 {
     out += kHexDigits[b >> 4];
     out += kHexDigits[b & 0x0f];
 }
 
-/* The sprite sheet / map / sound banks compare against an all-zero default;
-   sound banks additionally carry a note duration that PICO-8 seeds per bank. */
+/*
+ * gfx_line_is_default(d, line) — is this row of the sprite sheet empty?
+ *
+ * One row of the sprite sheet is 64 bytes.  A row that is all zeroes is
+ * the default and does not have to be written into the file.
+ *
+ * 스프라이트 시트의 한 줄은 64바이트다. 전부 0인 줄은 기본값이므로 파일에
+ * 쓸 필요가 없다.
+ */
 static bool gfx_line_is_default(const uint8_t *d, int line)
 {
     const uint8_t *p = d + PICO8_GFX_ADDR + (size_t)line * 64;
@@ -647,12 +920,30 @@ static bool gfx_line_is_default(const uint8_t *d, int line)
     return true;
 }
 
+/*
+ * gff_is_empty(d) — are the graphics flags empty?
+ *
+ * The flags are 256 bytes, one per sprite.  When they are all zero the
+ * __gff__ section is left out of the file.
+ *
+ * 플래그는 스프라이트마다 한 바이트씩 256바이트다. 전부 0이면 __gff__
+ * 섹션을 파일에 넣지 않는다.
+ */
 static bool gff_is_empty(const uint8_t *d)
 {
     for (int i = 0; i < 0x100; i++) if (d[PICO8_GFX_FLAGS + i]) return false;
     return true;
 }
 
+/*
+ * map_line_is_default(d, line) — is this row of the map empty?
+ *
+ * One row of the map is 128 bytes.  A row that is all zeroes is the
+ * default and does not have to be written into the file.
+ *
+ * 맵의 한 줄은 128바이트다. 전부 0인 줄은 기본값이므로 파일에 쓸 필요가
+ * 없다.
+ */
 static bool map_line_is_default(const uint8_t *d, int line)
 {
     const uint8_t *p = d + PICO8_MAP_ADDR + (size_t)line * 128;
@@ -660,6 +951,17 @@ static bool map_line_is_default(const uint8_t *d, int line)
     return true;
 }
 
+/*
+ * sfx_line_is_default(d, i) — is this sound effect the default one?
+ *
+ * The 32 notes have to be zero.  The four header bytes may not be, apart
+ * from the speed, which PICO-8 seeds per bank: 1 for the first effect and
+ * 16 for the others.
+ *
+ * 음표 32개는 전부 0이어야 한다. 헤더 4바이트는 속도를 제외하면 0이어야
+ * 하는데, 속도는 PICO-8이 뱅크마다 정해 둔다. 첫 번째 효과음은 1, 나머지는
+ * 16이다.
+ */
 static bool sfx_line_is_default(const uint8_t *d, int i)
 {
     const uint8_t *p = d + PICO8_SFX_ADDR + (size_t)i * CART_SFX_SIZE;
@@ -670,15 +972,40 @@ static bool sfx_line_is_default(const uint8_t *d, int i)
            (speed == 0 || speed == def_speed);
 }
 
+/*
+ * music_line_is_default(d, i) — is this song the default one?
+ *
+ * A song that was never touched holds the "no pattern" marker
+ * 0x41,0x42,0x43,0x44 in its four channel bytes.
+ *
+ * 건드리지 않은 song은 채널 바이트 네 개에 "패턴 없음" 표지
+ * 0x41,0x42,0x43,0x44를 들고 있다.
+ */
 static bool music_line_is_default(const uint8_t *d, int i)
 {
     const uint8_t *p = d + PICO8_SONG_ADDR + (size_t)i * CART_SONG_SIZE;
     return p[0] == 0x41 && p[1] == 0x42 && p[2] == 0x43 && p[3] == 0x44;
 }
 
-/* Serialize `d` (a 0x4300-byte data area) and `code` into PICO-8's .p8 text
-   format. Sections that only contain default data -- and the trailing default
-   lines of the others -- are omitted, exactly like PICO-8's own save. */
+/*
+ * cart_write_p8(path, d, code, version) — write a .p8 file.
+ *
+ * Puts the source and the data area into PICO-8's own text format.  The
+ * sections that only hold default data are left out, and the sections that
+ * hold real data are cut off after their last line that is not default, so
+ * a saved cart stays as small as the one the real PICO-8 writes.
+ *
+ * The source is stored as charset bytes and the file is UTF-8 text, so
+ * the glyphs are re-encoded on the way out.
+ *
+ * 소스와 데이터 영역을 PICO-8의 텍스트 형식으로 정리한다. 기본값만
+ * 들어 있는 섹션은 아예 빼고, 실제 데이터가 있는 섹션은 마지막으로 기본값이
+ * 아닌 줄에서 잘라내므로, 저장된 카트는 실제 PICO-8이 쓰는 만큼 작게
+ * 남는다.
+ *
+ * 소스는 charset 바이트로 저장되고 파일은 UTF-8 텍스트라서, 나갈 때 글자를
+ * 다시 인코딩한다.
+ */
 static int cart_write_p8(const char *path, const uint8_t *d,
                          const std::string &code, int version)
 {
@@ -791,11 +1118,29 @@ static int cart_write_p8(const char *path, const uint8_t *d,
     return (written == out.size()) ? 0 : -1;
 }
 
+/*
+ * pico8_cart_save_p8(path) — save the running cart as a .p8 file.
+ *
+ * The data that is written is the RAM of the running cart, so a cart that
+ * changed its sprites saves the new sprites.
+ *
+ * 쓰는 데이터는 실행 중인 카트의 RAM이므로, 스프라이트를 바꾼 카트는
+ * 새 스프라이트를 저장한다.
+ */
 int pico8_cart_save_p8(const char *path)
 {
     return cart_write_p8(path, pico8_ram, g_cart_source, kCartVersion);
 }
 
+/*
+ * pico8_cart_save_rom_p8(path) — save the cart as it was loaded.
+ *
+ * The data that is written is the data area of the cart on disk, so a
+ * cart that changed its sprites at runtime saves the old sprites.
+ *
+ * 쓰는 데이터는 디스크에 있는 카트의 데이터 영역이므로, 실행 중에 스프라이트를
+ * 바꾼 카트는 원래 스프라이트를 저장한다.
+ */
 int pico8_cart_save_rom_p8(const char *path)
 {
     return cart_write_p8(path, g_cart_rom, g_cart_source, kCartVersion);
@@ -805,10 +1150,15 @@ int pico8_cart_save_rom_p8(const char *path)
  *  .p8.png serialization
  * ------------------------------------------------------------------ */
 
-/* Small PNG encoder (8-bit RGBA, one IDAT). PICO-8 writes its carts with
-   LodePNG and tags them with a "LodePNG 20110221" text chunk; the image
-   payload is reproduced byte for byte by fixing the LSBs of each channel,
-   so we emit the same chunk layout for tooling that looks for it. */
+/*
+ * png_crc32(p, n) — the checksum of a PNG chunk.
+ *
+ * The CRC that every PNG chunk carries: the same polynomial as zlib uses
+ * (the reflected 0xedb88320) over the type of the chunk and its body.
+ *
+ * PNG의 모든 청크가 들고 다니는 체크섬. zlib과 같은 다항식(반사된
+ * 0xedb88320)을 청크의 타입과 본문에 대해 계산한다.
+ */
 static uint32_t png_crc32(const uint8_t *p, size_t n)
 {
     static uint32_t table[256];
@@ -827,6 +1177,14 @@ static uint32_t png_crc32(const uint8_t *p, size_t n)
     return c ^ 0xffffffffu;
 }
 
+/*
+ * png_be32(s, v) — a 32 bit number, big endian.
+ *
+ * Adds the number to the string, most significant byte first.  PNG counts
+ * in big endian.
+ *
+ * 수를 문자열에 붙인다. 큰 바이트부터. PNG는 빅 엔디안으로 센다.
+ */
 static void png_be32(std::string &s, uint32_t v)
 {
     s += (char)((v >> 24) & 0xff);
@@ -835,6 +1193,14 @@ static void png_be32(std::string &s, uint32_t v)
     s += (char)(v & 0xff);
 }
 
+/*
+ * png_chunk(out, type, body) — one PNG chunk.
+ *
+ * Writes the length, the four characters of the type, the body and the
+ * CRC of both.
+ *
+ * 길이, 네 글자의 타입, 본문, 그리고 둘의 CRC를 쓴다.
+ */
 static void png_chunk(std::string &out, const char *type, const std::string &body)
 {
     png_be32(out, (uint32_t)body.size());
@@ -843,8 +1209,17 @@ static void png_chunk(std::string &out, const char *type, const std::string &bod
     png_be32(out, png_crc32((const uint8_t *)tagged.data(), tagged.size()));
 }
 
-/* Deflate the filtered image with stored (uncompressed) blocks: valid zlib,
-   no dependency on a DEFLATE implementation. */
+/*
+ * zlib_stored(out, raw) — the image as a zlib stream.
+ *
+ * The image is deflated with stored (uncompressed) blocks: the result is a
+ * valid zlib stream, but a DEFLATE implementation is not needed.  The
+ * adler32 checksum at the end is the one of the uncompressed data.
+ *
+ * 이미지를 stored(압축하지 않은) 블록으로 deflate한다. 결과는 올바른 zlib
+ * 스트림이지만 DEFLATE 구현이 필요 없다. 끝에 붙는 adler32 체크섬은 압축하지
+ * 않은 데이터의 것이다.
+ */
 static void zlib_stored(std::string &out, const std::string &raw)
 {
     out += (char)0x78;                  /* CM=8, CINFO=7 */
@@ -872,8 +1247,17 @@ static void zlib_stored(std::string &out, const std::string &raw)
     png_be32(out, (b << 16) | a);
 }
 
-/* Byte `v` for pixel `p` is spread over the low two bits of every channel:
-   A holds the top bits, then R, G and finally B. */
+/*
+ * png_scatter(rows, height, palette, stride, filtered) — hide bytes in the picture.
+ *
+ * The cart is stored in the two low bits of every colour channel of every
+ * pixel.  The byte of a pixel is spread over the four channels: the alpha
+ * channel holds the top bits, then red, green and blue.
+ *
+ * 카트는 모든 픽셀의 색 채널 하위 두 비트에 저장된다. 픽셀의 바이트 하나가
+ * 네 채널에 흩어진다: 알파 채널이 상위 비트를, 그다음 빨강, 초록, 파랑이
+ * 나눠 가진다.
+ */
 static void png_scatter(const uint8_t *const *rows, int height,
                         const uint8_t *palette, int stride,
                         std::string &filtered)
@@ -894,6 +1278,26 @@ static void png_scatter(const uint8_t *const *rows, int height,
     }
 }
 
+/*
+ * cart_write_p8png(path, rom, code, logo) — write a .p8.png file.
+ *
+ * Builds the 160x205 picture that carries the cart: the data area in the
+ * first 0x4300 pixels, the compressed source at 0x4300 and the metadata
+ * at 0x8000.  The bytes are spread over the colour channels and the
+ * picture is written as a PNG.
+ *
+ * PICO-8 writes its carts with LodePNG and tags them with a "LodePNG
+ * 20110221" text chunk; the same chunk layout is used here so that the
+ * tooling which looks for it keeps working.
+ *
+ * 카트를 담는 160x205 그림을 만든다: 첫 0x4300 픽셀이 데이터 영역, 0x4300부터
+ * 압축된 소스, 0x8000부터 메타데이터다. 바이트를 색 채널에 흩어 놓고 PNG로
+ * 쓴다.
+ *
+ * PICO-8은 카트를 LodePNG로 쓰고 "LodePNG 20110221" 텍스트 청크로 표시를
+ * 남긴다. 여기서도 같은 청크 배치를 써서, 그것을 찾는 도구가 계속 동작하게
+ * 한다.
+ */
 static int cart_write_p8png(const char *path, const uint8_t *rom,
                             const std::string &code, const uint8_t *logo)
 {
@@ -965,18 +1369,40 @@ static int cart_write_p8png(const char *path, const uint8_t *rom,
     return (written == out.size()) ? 0 : -1;
 }
 
+/*
+ * pico8_cart_save_png(path) — save the running cart as a .p8.png file.
+ *
+ * The data that is written is the RAM of the running cart.
+ *
+ * 쓰는 데이터는 실행 중인 카트의 RAM이다.
+ */
 int pico8_cart_save_png(const char *path)
 {
     return cart_write_p8png(path, pico8_ram, g_cart_source, g_cart_logo);
 }
 
+/*
+ * pico8_cart_save_rom_png(path) — save the cart as it was loaded.
+ *
+ * The data that is written is the data area of the cart on disk.
+ *
+ * 쓰는 데이터는 디스크에 있는 카트의 데이터 영역이다.
+ */
 int pico8_cart_save_rom_png(const char *path)
 {
     return cart_write_p8png(path, g_cart_rom, g_cart_source, g_cart_logo);
 }
 
-/* Read just the data area of a cartridge (either .p8 or .p8.png) without
-   touching RAM or the VM; used by reload() with an explicit filename. */
+/*
+ * pico8_cart_read_data(path, out, out_len) — the data area of a cart file.
+ *
+ * Reads only the data area of a cart, either .p8 or .p8.png, without
+ * touching the RAM or the VM.  This is what reload() uses when it is given
+ * a file name of its own.
+ *
+ * 카트 파일(.p8 또는 .p8.png)의 데이터 영역만 읽는다. RAM이나 VM은 건드리지
+ * 않는다. reload()이 파일 이름을 따로 받았을 때 쓰는 것이 이것이다.
+ */
 int pico8_cart_read_data(const char *path, uint8_t *out, size_t out_len)
 {
     if (!path || !out || out_len < PICO8_CART_DATA_SIZE) return -1;
@@ -1014,8 +1440,18 @@ int pico8_cart_read_data(const char *path, uint8_t *out, size_t out_len)
     return 0;
 }
 
-/* RELOAD([DEST], [SOURCE], [LEN], [FILENAME])
-   Copy LEN bytes from the cart's on-disk data area into RAM. */
+/*
+ * pico8_cart_reload(dest, source, len, filename) — copy data back into the RAM.
+ *
+ * Copies `len` bytes from the data area of the cart into the RAM at
+ * `dest`.  Without a file name the data comes from the cart as it was
+ * loaded from disk, with one it comes from that file.  The copy is cut
+ * short at the end of both areas.
+ *
+ * `len`바이트를 카트의 데이터 영역에서 RAM의 `dest`로 복사한다. 파일 이름이
+ * 없으면 디스크에서 불러온 카트에서, 있으면 그 파일에서 가져온다. 복사는 두
+ * 영역의 끝에서 잘린다.
+ */
 int pico8_cart_reload(int dest, int source, int len, const char *filename)
 {
     if (len <= 0) len = PICO8_CART_DATA_SIZE;
@@ -1040,9 +1476,18 @@ int pico8_cart_reload(int dest, int source, int len, const char *filename)
     return len;
 }
 
-/* CSTORE([DEST], [SOURCE], [LEN], [FILENAME])
-   Copy LEN bytes from RAM into the cart's stored data area and, when the
-   cart is backed by a file, persist it. */
+/*
+ * pico8_cart_cstore(dest, source, len, filename) — copy data into the cart.
+ *
+ * Copies `len` bytes from the RAM into the data area of the cart at
+ * `dest`.  When the cart is backed by a file the file is written again,
+ * in the format its name asks for; otherwise the change only stays in
+ * memory until the next save.
+ *
+ * `len`바이트를 RAM에서 카트의 데이터 영역 `dest`로 복사한다. 카트가 파일로
+ * 뒷받침되어 있으면 그 파일을 다시 쓴다. 파일 이름이 요구하는 형식으로.
+ * 그렇지 않으면 다음 저장 때까지 메모리에만 남는다.
+ */
 int pico8_cart_cstore(int dest, int source, int len, const char *filename)
 {
     if (len <= 0) len = PICO8_CART_DATA_SIZE;

@@ -60,11 +60,25 @@
 
 #include <cstring>
 
+/*
+ * is_name_start(c) — can a name start with this?
+ *
+ * True for the letters and for the underscore.
+ *
+ * 알파벳과 밑줄이면 참.
+ */
 static int is_name_start(unsigned char c)
 {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
+/*
+ * is_name_char(c) — can a name continue with this?
+ *
+ * A letter, an underscore or a digit.
+ *
+ * 알파벳, 밑줄, 숫자면 참.
+ */
 static int is_name_char(unsigned char c)
 {
     return is_name_start(c) || (c >= '0' && c <= '9');
@@ -72,12 +86,27 @@ static int is_name_char(unsigned char c)
 
 static int is_digit(unsigned char c) { return c >= '0' && c <= '9'; }
 
+/*
+ * is_hex_digit(c) — is this a digit of a hexadecimal number?
+ *
+ * '0'..'9', 'a'..'f' and 'A'..'F'.
+ *
+ * '0'~'9', 'a'~'f', 'A'~'F'.
+ */
 static int is_hex_digit(unsigned char c)
 {
     return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
-/* A long bracket opener `[[`, `[=[`, `[==[` ... Returns its length, or 0. */
+/*
+ * long_bracket_open(s, len, i) — the long bracket that starts here.
+ *
+ * Looks for a long bracket opener (`[[`, `[=[`, `[==[` and so on) at the
+ * given place and returns how long it is, or 0 when there is none.
+ *
+ * 주어진 자리에 있는 긴 괄호 여는 기호(`[[`, `[=[`, `[==[` 등)를 찾아 그
+ * 길이를 돌려준다. 없으면 0이다.
+ */
 static size_t long_bracket_open(const char *s, size_t len, size_t i)
 {
     if (i >= len || s[i] != '[') return 0;
@@ -87,9 +116,16 @@ static size_t long_bracket_open(const char *s, size_t len, size_t i)
     return 0;
 }
 
-/* Skip to the closing bracket of a long bracket opened at `i + open_len`
-   (`open_len` counts `[`, the `=`s and the second `[`). Returns the index
-   just past the closing bracket, or `len` when unterminated. */
+/*
+ * long_bracket_close(s, len, from, open_len) — the end of a long bracket.
+ *
+ * Skips to the bracket that closes the long bracket that was opened at
+ * `from`.  The number of equals signs has to match the one of the opener.
+ * A bracket that is never closed runs to the end of the source.
+ *
+ * `from`에서 열린 긴 괄호를 닫는 괄호까지 건너뛴다. '='의 개수가 여는 기호와
+ * 같아야 한다. 닫히지 않는 괄호는 소스 끝까지 간다.
+ */
 static size_t long_bracket_close(const char *s, size_t len,
                                  size_t from, size_t open_len)
 {
@@ -106,8 +142,18 @@ static size_t long_bracket_close(const char *s, size_t len,
     return len;
 }
 
-/* Number literal starting at `i`: `0x` keeps hex digits and dots, `0b` keeps
-   binary digits and dots, everything else keeps decimal digits and dots. */
+/*
+ * scan_number(s, len, i) — the number literal that starts here.
+ *
+ * A number that starts with 0x keeps the hexadecimal digits and the
+ * dots, one that starts with 0b keeps the binary digits and the dots, and
+ * everything else keeps the decimal digits and the dots.  The scan is
+ * greedy over that alphabet, so `1..2` is one number and not two.
+ *
+ * 여기서 시작하는 숫자 리터럴을 읽는다. 0x로 시작하면 16진수 자리와 점을,
+ * 0b로 시작하면 2진수 자리와 점을, 그 외에는 10진수 자리와 점을 계속 읽는다.
+ * 탐욕적으로 읽으므로 `1..2`는 숫자 두 개가 아니라 하나다.
+ */
 static size_t scan_number(const char *s, size_t len, size_t i)
 {
     if (s[i] == '0' && i + 1 < len && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
@@ -127,23 +173,46 @@ static size_t scan_number(const char *s, size_t len, size_t i)
     return i;
 }
 
+/*
+ * word_is(s, n, word) — is this word that one?
+ *
+ * Compares the first `n` characters with the given word.
+ *
+ * 처음 `n`글자를 주어진 단어와 비교한다.
+ */
 static int word_is(const char *s, size_t n, const char *word)
 {
     size_t m = std::strlen(word);
     return n == m && !memcmp(s, word, m);
 }
 
-/* `end` and `local` are the only free words; everything else costs 1. */
+/*
+ * word_costs_one(s, n) — does this word cost a token?
+ *
+ * Every word costs one token, apart from `end` and `local`, which are
+ * free.
+ *
+ * `end`와 `local`만 무료이고, 나머지 단어는 모두 토큰 하나다.
+ */
 static int word_costs_one(const char *s, size_t n)
 {
     return !word_is(s, n, "end") && !word_is(s, n, "local");
 }
 
-/* A `-` immediately after one of these glues to a following number literal
-   (`not-1`, `and-1`, `if -1`, `return -1`).  These are exactly the keywords
-   that can be followed straight away by an expression: `then`, `do`, `else`,
-   `end`, `local`, `repeat`, `for`, `in` and `goto` all leave the following
-   `-1` as two tokens instead. */
+/*
+ * word_allows_unary_merge(s, n) — can a minus follow this word directly?
+ *
+ * The words that can be followed straight away by an expression let the
+ * minus of a negative number join the number: `not-1`, `and-1`, `if -1`
+ * and `return -1` are read as a single token.  The keywords that open a
+ * statement (`then`, `do`, `else`, `end`, `local`, `repeat`, `for`, `in`
+ * and `goto`) leave the `-1` as two tokens.
+ *
+ * 식을 바로 뒤에 둘 수 있는 단어는 음수 표지의 마이너스를 숫자에 붙인다.
+ * `not-1`, `and-1`, `if -1`, `return -1`이 한 토큰으로 읽힌다. 문장을 여는
+ * 키워드(`then`, `do`, `else`, `end`, `local`, `repeat`, `for`, `in`, `goto`)는
+ * `-1`을 두 토큰으로 남긴다.
+ */
 static int word_allows_unary_merge(const char *s, size_t n)
 {
     static const char *const kKeywords[] = {
@@ -166,6 +235,27 @@ static const char *const kOperators[] = {
     NULL
 };
 
+/*
+ * pico8_count_tokens(src, len) — how many tokens the source has.
+ *
+ * Counts the tokens the way PICO-8 does.  A name, a keyword, a number, a
+ * string, an operator and `(`, `[` or `{` cost one each; `)`, `]`, `}`, `,`
+ * and `;` are free, and so are the comments, the keywords `end` and
+ * `local`, the `.` and the `:`.
+ *
+ * The rule of the unary minus is the tricky one and was measured on the
+ * oracle: a `-` in front of a number joins it when the token before it
+ * cannot end an expression, and the words that open a statement are the
+ * exception to that.
+ *
+ * PICO-8과 같은 방식으로 토큰을 센다. 이름, 키워드, 숫자, 문자열, 연산자와
+ * `(`, `[`, `{`는 각각 1이고, `)`, `]`, `}`, `,`, `;`는 0이다. 주석도 0이고,
+ * `end`와 `local` 키워드도 0이며, `.`과 `:`도 0이다.
+ *
+ * 단항 마이너스의 규칙이 까다롭고 오라클에서 측정했다. 숫자 앞의 `-`는 앞
+ * 토큰이 식을 끝낼 수 없을 때 그 숫자에 붙고, 문장을 여는 키워드가 그
+ * 예외다.
+ */
 int pico8_count_tokens(const char *src, size_t len)
 {
     int tokens = 0;
