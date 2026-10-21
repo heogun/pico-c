@@ -87,7 +87,7 @@ TARGET         := $(BUILD_DIR)/pico-c$(EXE_SUFFIX)
 ASAN_TARGET    := $(BUILD_DIR)/pico-c-asan$(EXE_SUFFIX)
 TEST_CART      := $(ROOT)/tests/carts/test.p8
 
-CPP_SRCS := $(wildcard $(SRC_DIR)/*.cpp)
+CPP_SRCS := $(wildcard $(SRC_DIR)/*.cpp) $(wildcard $(SRC_DIR)/api/*.cpp)
 CPP_OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(CPP_SRCS))
 
 Z8LUA_NAMES := lapi lcode lctype ldebug ldo ldump \
@@ -108,11 +108,19 @@ help:
 $(OBJ_DIR) $(Z8LUA_OBJ_DIR) $(BUILD_DIR):
 	mkdir -p $@
 
+# Every source becomes an object of the same name; the folder layout of src/
+# is mirrored under obj/, so src/api/api_gfx.cpp becomes obj/api/api_gfx.o.
+#
 # The pico-c sources include lua.h, so the z8lua checkout has to exist before
 # they are compiled.  Depending on the stamp guarantees that, even on a tree
 # where z8lua has never been cloned.
+#
+# The recipe creates the folder of the object itself.  A second pattern rule
+# for src/api/ would be ambiguous: make prefers a rule without order-only
+# prerequisites, so the generic rule above would always win.
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp $(Z8LUA_STAMP) | $(OBJ_DIR)
-	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) -I$(Z8LUA_DIR) -c -o $@ $<
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) -I$(SRC_DIR)/api -I$(Z8LUA_DIR) -c -o $@ $<
 
 $(TARGET): $(CPP_OBJS) $(Z8LUA_A)
 	$(CXX) $(CXXFLAGS) -o $@ $(CPP_OBJS) $(Z8LUA_A) $(LIBS) $(LDFLAGS)
