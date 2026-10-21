@@ -12,6 +12,16 @@
 
 #include "api_internal.h"
 
+/*
+ * parse_index(L, idx) — the button number of an argument.
+ *
+ * The argument is either a button number or the character of a button:
+ * the arrow keys, the X and the O.  It returns -1 when the argument is
+ * neither.
+ *
+ * 인자는 버튼 번호이거나 버튼의 문자(방향키, X, O)이다. 둘 다 아니면 -1을
+ * 돌려준다.
+ */
 static int parse_index(lua_State *L, int idx)
 {
     if (lua_type(L, idx) == LUA_TSTRING) {
@@ -32,6 +42,16 @@ static int parse_index(lua_State *L, int idx)
     return -1;
 }
 
+/*
+ * btn(button, [player]) — is the button held down?
+ *
+ * Without an argument the state of all six buttons of the current player
+ * is returned as a bit mask.  With a button number or character it is
+ * true while that button is held.
+ *
+ * 인자가 없으면 현재 플레이어의 여섯 버튼 상태를 비트 마스크로 돌려준다.
+ * 버튼 번호나 문자를 주면 그 버튼이 눌려 있는 동안 true다.
+ */
 static int pico8_btn(lua_State *L)
 {
     int narg = lua_gettop(L);
@@ -49,6 +69,16 @@ static int pico8_btn(lua_State *L)
     return 1;
 }
 
+/*
+ * btnp(button, [player]) — was the button just pressed?
+ *
+ * True on the frame the button went down, and again on the frames of the
+ * auto repeat.  Without an argument the state of all six buttons is
+ * returned as a bit mask.
+ *
+ * 버튼이 눌린 프레임과 자동 반복이 일어나는 프레임에 true다. 인자가
+ * 없으면 여섯 버튼의 상태를 비트 마스크로 돌려준다.
+ */
 static int pico8_btnp(lua_State *L)
 {
     int narg = lua_gettop(L);
@@ -68,7 +98,6 @@ static int pico8_btnp(lua_State *L)
     lua_pushboolean(L, pico8_btnp_state[p][b]);
     return 1;
 }
-
 
 /* ------------------------------------------------------------------ *
  *  Registration

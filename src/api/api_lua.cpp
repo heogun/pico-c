@@ -20,6 +20,15 @@
 
 #include "api_internal.h"
 
+/*
+ * foreach(table, function) — run a function for every element of a table.
+ *
+ * The function gets the key and the value of one element.  The loop stops
+ * early when the function returns true.
+ *
+ * 함수가 테이블의 원소 하나마다 키와 값을 받는다. 함수가 true를 돌려주면
+ * 일찍 끝난다.
+ */
 static int pico8_foreach(lua_State *L)
 {
     luaL_checktype(L, 1, LUA_TTABLE);
@@ -33,6 +42,15 @@ static int pico8_foreach(lua_State *L)
     return 0;
 }
 
+/*
+ * unpack(table, [first, [last]]) — the elements of a table as values.
+ *
+ * Returns the elements from first to last, so that they can be given to a
+ * function.  The default is the whole table.
+ *
+ * first부터 last까지의 원소를 값으로 돌려준다. 그래야 함수에 넘길 수 있다.
+ * 기본값은 테이블 전체다.
+ */
 static int pico8_unpack(lua_State *L)
 {
     luaL_checktype(L, 1, LUA_TTABLE);
@@ -52,6 +70,14 @@ static int pico8_unpack(lua_State *L)
 static int32_t seed_hi = 0x60009755;
 static int32_t seed_lo = 0xdeadbeef;
 
+/*
+ * pico8_random(limit) — a random number below limit.
+ *
+ * The generator is a 64 bit linear congruential one; the seed lives in the
+ * two variables seed_hi and seed_lo.
+ *
+ * 생성기는 64비트 선형 합동식이다. 시드는 seed_hi와 seed_lo 두 변수에 있다.
+ */
 static int32_t pico8_random(int32_t limit)
 {
     seed_hi = (seed_hi << 16) | ((uint32_t)seed_hi >> 16);
@@ -69,6 +95,13 @@ static int32_t pico8_random(int32_t limit)
     return result;
 }
 
+/*
+ * srand(seed) — set the seed of the random number generator.
+ *
+ * Sets the seed of the random number generator.
+ *
+ * 난수 생성기의 시드를 정한다.
+ */
 static int pico8_srand(lua_State *L)
 {
     int32_t s = ((z8::fix32)luaL_checknumber(L, 1)).bits();
@@ -78,6 +111,16 @@ static int pico8_srand(lua_State *L)
     return 0;
 }
 
+/*
+ * rnd(x) — a random number.
+ *
+ * rnd()          a number from 0 to 1
+ * rnd(n)         a whole number from 0 to n-1
+ * rnd(a, b)      a whole number from a to b-1
+ *
+ * rnd()은 0부터 1 사이의 수, rnd(n)은 0부터 n-1까지의 정수,
+ * rnd(a, b)는 a부터 b-1까지의 정수를 돌려준다.
+ */
 static int pico8_rnd(lua_State *L)
 {
     if (lua_istable(L, 1)) {
@@ -99,6 +142,14 @@ static int pico8_rnd(lua_State *L)
     return 1;
 }
 
+/*
+ * count(table) — the number of elements in a table.
+ *
+ * Counts the elements the way PICO-8 does, which is not always the same as
+ * the length of the array part.
+ *
+ * PICO-8이 세는 방식대로 원소를 센다. 배열 부분의 길이와 항상 같지는 않다.
+ */
 static int pico8_count(lua_State *L)
 {
     if (lua_gettop(L) < 1 || lua_isnil(L, 1)) { lua_pushinteger(L, 0); return 1; }
@@ -117,6 +168,15 @@ static int pico8_count(lua_State *L)
     return 1;
 }
 
+/*
+ * deli(table, [position]) — remove an element from a table.
+ *
+ * Without a position the last element is removed, otherwise the one at
+ * that position.  The elements after it move down.
+ *
+ * 위치를 주지 않으면 마지막 원소를, 주면 그 위치의 원소를 지운다. 그 뒤의
+ * 원소들이 앞으로 당겨진다.
+ */
 static int pico8_deli(lua_State *L)
 {
     luaL_checktype(L, 1, LUA_TTABLE);
@@ -133,12 +193,28 @@ static int pico8_deli(lua_State *L)
     return 1;
 }
 
+/*
+ * serial() — a new serial number for the cart.
+ *
+ * Every call gives a number that has not been used before, so that a cart
+ * can name its save files.
+ *
+ * 호출할 때마다 전에 쓰지 않은 번호를 주므로, 카트가 저장 파일 이름을
+ * 지을 때 쓸 수 있다.
+ */
 static int pico8_serial(lua_State *L)
 {
     (void)L;
     return 0;
 }
 
+/*
+ * add(table) — add a table to the list of carts of the shell.
+ *
+ * The shell keeps the carts of the "cartridge tab" in one table.
+ *
+ * 셸은 "카트리지 탭"의 카트들을 하나의 테이블에 모아 둔다.
+ */
 static int pico8_add(lua_State *L)
 {
     if (lua_isnil(L, 1)) return 0;
@@ -148,6 +224,11 @@ static int pico8_add(lua_State *L)
     return 0;
 }
 
+/*
+ * del(table) — remove a cart from the list of carts of the shell.
+ *
+ * 셸의 카트 목록에서 카트를 지운다.
+ */
 static int pico8_del(lua_State *L)
 {
     luaL_checktype(L, 1, LUA_TTABLE);
@@ -168,6 +249,13 @@ static int pico8_del(lua_State *L)
     return 0;
 }
 
+/*
+ * all() — every cart of the shell.
+ *
+ * Returns the table with all the carts of the cartridge tab.
+ *
+ * 카트리지 탭의 모든 카트를 담은 테이블을 돌려준다.
+ */
 static int pico8_all(lua_State *L)
 {
     if (lua_gettop(L) < 1 || lua_isnil(L, 1)) {
@@ -192,8 +280,14 @@ static int pico8_all(lua_State *L)
     return 1;
 }
 
-/* Forward a call such as mkdir("name") / cd("dir") / dir() to the shell. String
-   arguments are joined with spaces to form the command line. */
+/*
+ * pico8_shell_cmd(L) — run a shell command from Lua.
+ *
+ * The name of the command is the upvalue of the closure, so all the shell
+ * commands share this one function.
+ *
+ * 명령 이름은 클로저의 업밸류이므로, 모든 셸 명령이 이 함수 하나를 공유한다.
+ */
 static int pico8_shell_cmd(lua_State *L)
 {
     const char *name = lua_tostring(L, lua_upvalueindex(1));
@@ -210,7 +304,6 @@ static int pico8_shell_cmd(lua_State *L)
     pico8_console_exec(line.c_str());
     return 0;
 }
-
 
 /* ------------------------------------------------------------------ *
  *  Registration

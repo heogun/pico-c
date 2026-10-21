@@ -28,6 +28,18 @@
 
 static int tline_px_mode = 0;
 
+/*
+ * api_apply_camera(x, y) — move a screen coordinate into camera space.
+ *
+ * The camera offset lives in the draw state (0x5f29..0x5f2c) as two signed
+ * 16 bit values.  Every drawing call subtracts that offset from the
+ * coordinates the cart passed in, so a cart scrolls the world by moving the
+ * camera.
+ *
+ * 카메라 오프셋은 드로우 상태(0x5f29~0x5f2c)에 부호 있는 16비트 값 두 개로
+ * 저장된다. 모든 드로잉 호출이 카트가 준 좌표에서 그 오프셋을 빼므로, 카트는
+ * 카메라를 움직여 세상의 좌표를 스크롤시킬 수 있다.
+ */
 void api_apply_camera(int *x, int *y)
 {
     uint16_t cx = pico8_ram[0x5f29] | ((uint16_t)pico8_ram[0x5f2a] << 8);
@@ -36,15 +48,31 @@ void api_apply_camera(int *x, int *y)
     *y -= (int16_t)cy;
 }
 
-/* Current 4x4 fill pattern: 0x5f31 holds the low byte, 0x5f32 the high byte. */
+/*
+ * fillp_pattern() — the current 4x4 fill pattern.
+ *
+ * The pattern is a 16 bit mask with one bit per pixel of a 4x4 block.  It
+ * is stored in 0x5f31 (low byte) and 0x5f32 (high byte).
+ *
+ * 패턴은 4x4 블록의 픽셀당 한 비트씩 가진 16비트 마스크다. 0x5f31(하위
+ * 바이트)과 0x5f32(상위 바이트)에 저장된다.
+ */
 static inline uint16_t fillp_pattern(void)
 {
     return (uint16_t)(((uint16_t)pico8_ram[0x5f32] << 8) | pico8_ram[0x5f31]);
 }
 
-/* Pick the on/off colour for pixel (x,y) according to the fill pattern.
- * Returns 0 if the pixel is transparent (pattern on-bit with the transparency
- * flag set), else stores the chosen colour index in *out. */
+/*
+ * fillp_pick(x, y, on, off, out) — the on/off colour of one pixel.
+ *
+ * A set bit of the pattern means the "on" colour, a clear bit the "off"
+ * colour.  When the transparency flag (0x5f33 bit 0) is set, the on bits
+ * are transparent: the function returns 0 and nothing is drawn.
+ *
+ * 패턴의 켜진 비트는 "on" 색, 꺼진 비트는 "off" 색을 뜻한다. 투명도 플래그
+ * (0x5f33의 0번 비트)가 켜져 있으면 on 비트는 투명하다. 함수는 0을 돌려주고
+ * 아무것도 그리지 않는다.
+ */
 static int fillp_pick(int x, int y, uint8_t on, uint8_t off, uint8_t *out)
 {
     uint16_t pat = fillp_pattern();
@@ -59,9 +87,16 @@ static int fillp_pick(int x, int y, uint8_t on, uint8_t off, uint8_t *out)
     return 1;
 }
 
-/* Resolve the colour to store for pixel (x,y) given a raw colour argument.
- * The fill pattern observes the high/low nibbles as the on/off colour, then
- * the result is mapped through the draw palette. */
+/*
+ * fillp_color(x, y, colraw, out) — the colour to store for one pixel.
+ *
+ * The raw colour argument packs the on colour in the high nibble and the
+ * off colour in the low one.  The fill pattern decides which of the two is
+ * used, and the result is mapped through the draw palette afterwards.
+ *
+ * 원시 색 인자는 상위 니블에 on 색, 하위 니블에 off 색을 담는다. 필 패턴이 둘
+ * 중 어느 쪽을 쓸지 정하고, 그 결과는 나중에 드로우 팔레트를 거쳐 매핑된다.
+ */
 static int fillp_color(int x, int y, uint32_t colraw, uint8_t *out)
 {
     uint8_t c;
@@ -75,10 +110,18 @@ static int fillp_color(int x, int y, uint32_t colraw, uint8_t *out)
    kept in a private buffer rather than pico8_ram. */
 static uint8_t g_secondary_pal[16] = {0};
 
-/* Resolve a sprite pixel: the sprite colour is first mapped through the draw
-   palette (done by the caller), then, when the fill pattern's "apply to
-   sprites" flag is set, the mapped index selects an on/off pair from the
-   secondary palette according to the 4x4 fill pattern. */
+/*
+ * sprite_fillp(px, py, mc, out) — the colour of one sprite pixel.
+ *
+ * The colour of the sprite pixel has already been mapped through the draw
+ * palette by the caller.  When the "apply the fill pattern to sprites" flag
+ * (0x5f33 bit 1) is set, the mapped index picks an on/off pair out of the
+ * secondary palette instead of being the final colour.
+ *
+ * 스프라이트 픽셀의 색은 호출자가 이미 드로우 팔레트를 거쳐 매핑했다.
+ * "스프라이트에도 필 패턴 적용" 플래그(0x5f33의 1번 비트)가 켜져 있으면, 그
+ * 매핑된 인덱스가 최종 색 대신 세컨더리 팔레트에서 on/off 짝을 고른다.
+ */
 static int sprite_fillp(int px, int py, uint8_t mc, uint8_t *out)
 {
     if (!(pico8_ram[0x5f33] & 2)) { *out = mc; return 1; }
@@ -90,6 +133,16 @@ static int sprite_fillp(int px, int py, uint8_t mc, uint8_t *out)
     return 1;
 }
 
+/*
+ * pset(x, y, color) — put one pixel on the screen.
+ *
+ * A NULL colour means the current draw colour (0x5f25).  The colour goes
+ * through the fill pattern and the draw palette first, so what lands in the
+ * screen RAM is a palette index and not a colour.
+ *
+ * color가 NULL이면 현재 드로우 색(0x5f25)을 쓴다. 색은 먼저 필 패턴과 드로우
+ * 팔레트를 거치므로, 화면 RAM에 들어가는 값은 색이 아니라 팔레트 인덱스다.
+ */
 static void pset(int x, int y, int *color)
 {
     if ((unsigned)x >= 128 || (unsigned)y >= 128) return;
@@ -103,6 +156,13 @@ static void pset(int x, int y, int *color)
         pico8_ram[addr] = (pico8_ram[addr] & 0xf0) | pal;
 }
 
+/*
+ * pget(x, y) — the palette index of one screen pixel.
+ *
+ * Reads the screen RAM directly; the fill pattern is not applied.
+ *
+ * 화면 RAM을 직접 읽는다. 필 패턴은 적용하지 않는다.
+ */
 static uint8_t pget(int x, int y)
 {
     if ((unsigned)x >= 128 || (unsigned)y >= 128) return 0;
@@ -110,6 +170,16 @@ static uint8_t pget(int x, int y)
     return (x & 1) ? (pico8_ram[addr] >> 4) & 0x0f : pico8_ram[addr] & 0x0f;
 }
 
+/*
+ * hline(x0, x1, y, color) — draw a horizontal line.
+ *
+ * Without a fill pattern the whole run is written with memset(), two pixels
+ * per byte, which is much faster than calling pset() for every pixel.  With
+ * a pattern every pixel is drawn on its own.
+ *
+ * 필 패턴이 없으면 memset()으로 두 픽셀씩 한꺼번에 쓴다. 픽셀마다 pset()을
+ * 부르는 것보다 훨씬 빠르다. 패턴이 있으면 픽셀마다 따로 그린다.
+ */
 static void hline(int x0, int x1, int y, int *color)
 {
     if ((unsigned)y >= 128) return;
@@ -141,6 +211,15 @@ static void hline(int x0, int x1, int y, int *color)
     }
 }
 
+/*
+ * draw_line(x0, y0, x1, y1, color) — draw a line.
+ *
+ * Horizontal and vertical lines take a fast path; everything else uses
+ * Bresenham's algorithm, so the line has neither gaps nor doubled pixels.
+ *
+ * 수평선과 수직선은 빠른 경로를 탄다. 그 외에는 Bresenham 알고리즘을 써서
+ * 선에 끊김도, 두 번 그려지는 픽셀도 없게 한다.
+ */
 static void draw_line(int x0, int y0, int x1, int y1, int *color)
 {
     if (x0 == x1) {
@@ -176,6 +255,15 @@ static void draw_line(int x0, int y0, int x1, int y1, int *color)
     }
 }
 
+/*
+ * draw_circle(cx, cy, r, color, fill) — draw a circle.
+ *
+ * The midpoint algorithm walks the circle in eighths, which keeps the
+ * outline even.  A filled circle draws four horizontal runs per step.
+ *
+ * 중점 알고리즘이 원을 8분할로 걸어 가므로 외곽선이 매끄럽다. 채우는 쪽은 한
+ * 걸음마다 수평선 네 개를 그린다.
+ */
 static void draw_circle(int cx, int cy, int r, int *color, int fill)
 {
     int x = 0, y = r, d = 3 - 2 * r;
@@ -197,6 +285,17 @@ static void draw_circle(int cx, int cy, int r, int *color, int fill)
     }
 }
 
+/*
+ * draw_sprite(n, x, y, w, h, flip_x, flip_y) — draw a sprite.
+ *
+ * The sprite sheet holds 16x16 sprites of 8x8 pixels; w and h give the size
+ * in sprites.  A sprite colour whose draw palette entry has bit 4 set is
+ * transparent and is skipped.
+ *
+ * 스프라이트 시트에는 8x8 픽셀짜리 스프라이트가 16x16개 들어 있고, w와 h는
+ * 스프라이트 단위의 크기다. 드로우 팔레트 항목의 4번 비트가 켜진 색은 투명해서
+ * 건너뛴다.
+ */
 static void draw_sprite(uint8_t n, int x, int y, uint8_t w, uint8_t h, int flip_x, int flip_y)
 {
     int bw = w * 8, bh = h * 8;
@@ -229,6 +328,16 @@ static void draw_sprite(uint8_t n, int x, int y, uint8_t w, uint8_t h, int flip_
     }
 }
 
+/*
+ * cls(color) — clear the screen.
+ *
+ * Fills the whole screen with one colour and puts the text cursor back to
+ * the top left corner.  Without an argument the screen is cleared with the
+ * current draw colour.
+ *
+ * 화면 전체를 한 색으로 채우고 텍스트 커서를 왼쪽 위로 되돌린다. 인자가
+ * 없으면 현재 드로우 색으로 지운다.
+ */
 static int pico8_cls(lua_State *L)
 {
     int c = fix32_to_int(luaL_optinteger(L, 1, 0));
@@ -239,6 +348,17 @@ static int pico8_cls(lua_State *L)
     return 0;
 }
 
+/*
+ * spr(n, x, y, w, h, flip_x, flip_y) — draw a sprite.
+ *
+ * Draws the sprite number n at (x, y).  The size w and h are given in
+ * sprites, so spr(n, x, y, 2, 2) draws a 16x16 pixel sprite.  The two flip
+ * flags mirror the sprite horizontally or vertically.
+ *
+ * 스프라이트 번호 n을 (x, y)에 그린다. 크기 w와 h는 스프라이트 단위이므로
+ * spr(n, x, y, 2, 2)는 16x16 픽셀 스프라이트를 그린다. 두 flip 플래그는
+ * 스프라이트를 가로 또는 세로로 뒤집는다.
+ */
 static int pico8_spr(lua_State *L)
 {
     if (lua_isnoneornil(L, 1) || !lua_isnumber(L, 1)) return 0;
@@ -254,6 +374,18 @@ static int pico8_spr(lua_State *L)
     return 0;
 }
 
+/*
+ * sspr(sx, sy, sw, sh, dx, dy, dw, dh, flip_x, flip_y) — stretch a part of
+ * the sprite sheet onto the screen.
+ *
+ * Copies the rectangle (sx, sy, sw, sh) of the sprite sheet to (dx, dy),
+ * scaled to dw x dh pixels.  A negative dw or dh flips the copy and moves
+ * the destination accordingly.
+ *
+ * 스프라이트 시트의 사각형 (sx, sy, sw, sh)를 (dx, dy)에 dw x dh 픽셀로
+ * 늘려서 그린다. dw나 dh가 음수면 복사 방향을 뒤집고 목적지도 그에 맞춰
+ * 옮긴다.
+ */
 static int pico8_sspr(lua_State *L)
 {
     int sx = fix32_to_int(luaL_checknumber(L, 1));
@@ -294,6 +426,14 @@ static int pico8_sspr(lua_State *L)
     return 0;
 }
 
+/*
+ * cursor(x, y, color) — move the text cursor.
+ *
+ * Sets the position print() writes at next and, when a third argument is
+ * given, the colour it writes in.
+ *
+ * print()가 다음에 쓸 위치와, 세 번째 인자가 주어지면 그 색을 정한다.
+ */
 static int pico8_cursor(lua_State *L)
 {
     pico8_ram[0x5f26] = fix32_to_uint8(luaL_checknumber(L, 1));
@@ -303,6 +443,16 @@ static int pico8_cursor(lua_State *L)
     return 0;
 }
 
+/*
+ * camera(x, y) — move the camera.
+ *
+ * Everything that is drawn afterwards is shifted by (x, y), which is how a
+ * cart scrolls a world that is larger than the screen.  camera() without
+ * arguments moves the camera back to the origin.
+ *
+ * 그 뒤에 그려지는 모든 것이 (x, y)만큼 밀린다. 카트가 화면보다 큰 세계를
+ * 스크롤하는 방법이다. 인자가 없으면 카메라를 원점으로 되돌린다.
+ */
 static int pico8_camera(lua_State *L)
 {
     int nx = 0, ny = 0;
@@ -316,6 +466,15 @@ static int pico8_camera(lua_State *L)
     return 0;
 }
 
+/*
+ * clip(x, y, w, h) — limit where drawing may go.
+ *
+ * Nothing is drawn outside the given rectangle until the clip is changed
+ * again.  clip() without arguments sets it back to the whole screen.
+ *
+ * 주어진 사각형 밖으로는 아무것도 그려지지 않는다. clip()을 인자 없이
+ * 부르면 다시 화면 전체로 되돌아간다.
+ */
 static int pico8_clip(lua_State *L)
 {
     if (lua_gettop(L) == 0) {
@@ -332,6 +491,15 @@ static int pico8_clip(lua_State *L)
     return 0;
 }
 
+/*
+ * pset(x, y, color) — put one pixel on the screen.
+ *
+ * Without a colour the current draw colour is used.  The camera offset is
+ * applied, so the pixel lands where the cart thinks it does.
+ *
+ * 색을 주지 않으면 현재 드로우 색을 쓴다. 카메라 오프셋이 적용되므로,
+ * 카트가 생각하는 위치에 픽셀이 놓인다.
+ */
 static int pico8_pset(lua_State *L)
 {
     int x = fix32_to_int(luaL_checknumber(L, 1));
@@ -344,6 +512,14 @@ static int pico8_pset(lua_State *L)
     return 0;
 }
 
+/*
+ * pget(x, y) — the palette index of the pixel at (x, y).
+ *
+ * The camera offset is applied, so the pixel that is read is the one that
+ * pset() would have written.
+ *
+ * 카메라 오프셋이 적용되므로, 읽히는 픽셀은 pset()이 썼을 픽셀이랑 같다.
+ */
 static int pico8_pget(lua_State *L)
 {
     int x = fix32_to_int(luaL_checknumber(L, 1));
@@ -353,6 +529,15 @@ static int pico8_pget(lua_State *L)
     return 1;
 }
 
+/*
+ * sget(x, y) — the colour of a pixel of the sprite sheet.
+ *
+ * Reads the sprite sheet (0x0000..0x0fff) and returns the colour index
+ * stored there, 0..15.  The camera does not apply here.
+ *
+ * 스프라이트 시트(0x0000~0x0fff)를 읽어 그 자리에 저장된 색 인덱스(0~15)를
+ * 돌려준다. 여기는 카메라가 적용되지 않는다.
+ */
 static int pico8_sget(lua_State *L)
 {
     int x = fix32_to_int(luaL_checknumber(L, 1)) & 0x7f;
@@ -364,6 +549,15 @@ static int pico8_sget(lua_State *L)
     return 1;
 }
 
+/*
+ * sset(x, y, color) — write a pixel of the sprite sheet.
+ *
+ * Writes the colour index into the sprite sheet (0x0000..0x0fff).  The
+ * camera does not apply here.
+ *
+ * 스프라이트 시트(0x0000~0x0fff)에 색 인덱스를 쓴다. 여기는 카메라가
+ * 적용되지 않는다.
+ */
 static int pico8_sset(lua_State *L)
 {
     int x = fix32_to_int(luaL_checknumber(L, 1)) & 0x7f;
@@ -375,6 +569,14 @@ static int pico8_sset(lua_State *L)
     return 0;
 }
 
+/*
+ * line(x0, y0, x1, y1, color) — draw a line.
+ *
+ * Draws a straight line between the two points.  The camera offset applies
+ * to both ends.
+ *
+ * 두 점을 잇는 직선을 그린다. 카메라 오프셋이 양 끝점 모두에 적용된다.
+ */
 static int pico8_line(lua_State *L)
 {
     int x0 = fix32_to_int(luaL_checknumber(L, 1));
@@ -389,6 +591,13 @@ static int pico8_line(lua_State *L)
     return 0;
 }
 
+/*
+ * rect(x0, y0, x1, y1, color) — draw the outline of a rectangle.
+ *
+ * The corners are included.  The camera offset applies to both corners.
+ *
+ * 모서리도 포함한다. 카메라 오프셋이 양쪽 모서리 모두에 적용된다.
+ */
 static int pico8_rect(lua_State *L)
 {
     int x0 = fix32_to_int(luaL_checknumber(L, 1));
@@ -404,6 +613,13 @@ static int pico8_rect(lua_State *L)
     return 0;
 }
 
+/*
+ * rectfill(x0, y0, x1, y1, color) — fill a rectangle.
+ *
+ * The corners are included.  The camera offset applies to both corners.
+ *
+ * 모서리도 포함한다. 카메라 오프셋이 양쪽 모서리 모두에 적용된다.
+ */
 static int pico8_rectfill(lua_State *L)
 {
     int x0 = fix32_to_int(luaL_checknumber(L, 1));
@@ -418,6 +634,13 @@ static int pico8_rectfill(lua_State *L)
     return 0;
 }
 
+/*
+ * circ(x, y, radius, color) — draw the outline of a circle.
+ *
+ * The radius defaults to 4.  The camera offset applies to the centre.
+ *
+ * 반지름의 기본값은 4다. 카메라 오프셋이 중심에 적용된다.
+ */
 static int pico8_circ(lua_State *L)
 {
     int cx = fix32_to_int(luaL_checknumber(L, 1));
@@ -430,6 +653,13 @@ static int pico8_circ(lua_State *L)
     return 0;
 }
 
+/*
+ * circfill(x, y, radius, color) — fill a circle.
+ *
+ * The radius defaults to 4.  The camera offset applies to the centre.
+ *
+ * 반지름의 기본값은 4다. 카메라 오프셋이 중심에 적용된다.
+ */
 static int pico8_circfill(lua_State *L)
 {
     int cx = fix32_to_int(luaL_checknumber(L, 1));
@@ -442,6 +672,15 @@ static int pico8_circfill(lua_State *L)
     return 0;
 }
 
+/*
+ * oval(x0, y0, x1, y1, color) — draw the outline of an ellipse.
+ *
+ * The ellipse is inscribed in the rectangle formed by the two points.  The
+ * camera offset applies to both corners.
+ *
+ * 두 점이 만드는 사각형에 내접하는 타원을 그린다. 카메라 오프셋이 양쪽
+ * 모서리 모두에 적용된다.
+ */
 static int pico8_oval(lua_State *L)
 {
     int x0 = fix32_to_int(luaL_checknumber(L, 1));
@@ -471,6 +710,15 @@ static int pico8_oval(lua_State *L)
     return 0;
 }
 
+/*
+ * ovalfill(x0, y0, x1, y1, color) — fill an ellipse.
+ *
+ * The ellipse is inscribed in the rectangle formed by the two points.  The
+ * camera offset applies to both corners.
+ *
+ * 두 점이 만드는 사각형에 내접하는 타원을 채운다. 카메라 오프셋이 양쪽
+ * 모서리 모두에 적용된다.
+ */
 static int pico8_ovalfill(lua_State *L)
 {
     int x0 = fix32_to_int(luaL_checknumber(L, 1));
@@ -500,6 +748,19 @@ static int pico8_ovalfill(lua_State *L)
     return 0;
 }
 
+/*
+ * pal_base(p) — the memory of one of the three palettes.
+ *
+ *   0  the draw palette, in the RAM at 0x5f00
+ *   1  the draw palette of the screen below, in the RAM at 0x5f10
+ *   2  the secondary palette, which PICO-8 does not map into the RAM and
+ *      which is therefore kept in a private buffer
+ *
+ *   0  드로우 팔레트. RAM의 0x5f00
+ *   1  아래쪽 화면의 드로우 팔레트. RAM의 0x5f10
+ *   2  세컨더리 팔레트. PICO-8은 이것을 RAM에 대응시키지 않으므로 별도의
+ *      버퍼에 보관한다
+ */
 static uint8_t *pal_base(int p)
 {
     if (p == 1) return &pico8_ram[0x5f10];
@@ -531,6 +792,21 @@ void pico8_pal_reset_all(void)
     pal_reset_one(2);
 }
 
+/*
+ * pal(...) — change the palette.
+ *
+ * pal()                 resets every palette to its default
+ * pal(c0, c1)           changes one colour of the draw palette
+ * pal(c0, c1, p)        changes one colour of palette p
+ * pal(table, p)         changes many colours at once
+ *
+ * The second colour of a pair replaces the whole nibble of the palette
+ * entry, so the high nibble of the draw colour is lost.  That is what
+ * PICO-8 does as well.
+ *
+ * 한 쌍의 두 번째 색이 팔레트 항목의 니블 전체를 대체하므로 드로우 색의
+ * 상위 니블은 사라진다. 실제 PICO-8도 그렇게 한다.
+ */
 static int pico8_pal(lua_State *L)
 {
     int narg = lua_gettop(L);
@@ -562,6 +838,18 @@ static int pico8_pal(lua_State *L)
     return 0;
 }
 
+/*
+ * palt(...) — change which colours of the draw palette are transparent.
+ *
+ * palt()             makes every colour but the first one transparent
+ * palt(mask)         sets the transparency of the 16 colours at once
+ * palt(color, value) sets the transparency of a single colour
+ *
+ * The transparency bit is bit 4 of the palette entry, so a transparent
+ * colour is the one that is not drawn at all.
+ *
+ * 투명도 비트는 팔레트 항목의 4번 비트다. 투명한 색은 아예 그려지지 않는다.
+ */
 static int pico8_palt(lua_State *L)
 {
     int narg = lua_gettop(L);
@@ -582,12 +870,33 @@ static int pico8_palt(lua_State *L)
     return 0;
 }
 
+/*
+ * color(color) — set the colour that is drawn.
+ *
+ * The colour is stored in the draw state (0x5f25) and used by every drawing
+ * call that has no colour of its own.  The default is 6.
+ *
+ * 색을 드로우 상태(0x5f25)에 저장한다. 스스로 색을 지정하지 않는 모든
+ * 드로잉 호출이 이 색을 쓴다. 기본값은 6이다.
+ */
 static int pico8_color(lua_State *L)
 {
     pico8_ram[0x5f25] = fix32_to_uint8(luaL_optinteger(L, 1, 6));
     return 0;
 }
 
+/*
+ * fillp(pattern) — set the 4x4 fill pattern.
+ *
+ * The pattern is a 16 bit mask, one bit per pixel of a 4x4 block, given as
+ * a number or as one of the eight built in patterns (the characters with
+ * the code 128..135).  The fractional bits of the number carry three flags:
+ * transparency, "apply to sprites" and the secondary palette.
+ *
+ * 패턴은 4x4 블록의 픽셀당 한 비트씩 가진 16비트 마스크다. 숫자로 주거나
+ * 내장 패턴 여덟 개(코드 128~135인 문자) 중 하나로 준다. 숫자의 소수 부분이
+ * 투명도, "스프라이트에도 적용", 세컨더리 팔레트 세 개의 플래그를 담는다.
+ */
 static int pico8_fillp(lua_State *L)
 {
     uint32_t raw = 0;
@@ -619,6 +928,15 @@ static int pico8_fillp(lua_State *L)
     return 0;
 }
 
+/*
+ * fget(n, flag) — read the graphics flags of a sprite.
+ *
+ * With one argument the whole byte of flags is returned, with two a single
+ * bit of it.  The flags live in the RAM at 0x3000, one byte per sprite.
+ *
+ * 인자가 하나면 플래그 바이트 전체를, 두 개면 그중 한 비트를 돌려준다.
+ * 플래그는 RAM의 0x3000에 스프라이트마다 한 바이트로 저장된다.
+ */
 static int pico8_fget(lua_State *L)
 {
     uint8_t n = fix32_to_uint8(luaL_checknumber(L, 1));
@@ -632,6 +950,14 @@ static int pico8_fget(lua_State *L)
     return 1;
 }
 
+/*
+ * fset(n, flag, value) — set the graphics flags of a sprite.
+ *
+ * With two arguments the whole byte is replaced, with three a single bit
+ * is set or cleared.
+ *
+ * 인자가 두 개면 바이트 전체를 바꾸고, 세 개면 한 비트만 켜거나 끈다.
+ */
 static int pico8_fset(lua_State *L)
 {
     uint8_t n = fix32_to_uint8(luaL_checknumber(L, 1));
@@ -648,6 +974,15 @@ static int pico8_fset(lua_State *L)
     return 0;
 }
 
+/*
+ * map_get(col, row) — the sprite number of a map cell.
+ *
+ * The map is 128x64 cells; the upper half (rows 32..63) lives in a second
+ * block of the RAM, so both halves are looked up here.
+ *
+ * 맵은 128x64 칸이다. 위쪽 절반(32~63행)은 RAM의 다른 블록에 있으므로,
+ * 여기서 두 절반을 모두 찾아준다.
+ */
 static uint8_t map_get(int col, int row)
 {
     if ((unsigned)col >= PICO8_MAP_W || (unsigned)row >= PICO8_MAP_H) return 0;
@@ -655,6 +990,18 @@ static uint8_t map_get(int col, int row)
     return pico8_ram[PICO8_MAP2_ADDR + (row - 32) * 128 + col];
 }
 
+/*
+ * map(celx, cely, sx, sy, celw, celh, layer) — draw the map.
+ *
+ * Draws the map cells starting at (celx, cely) onto the screen at (sx, sy).
+ * celw and celh default to the size of the whole map.  When a layer is
+ * given, only the sprites whose graphics flags contain that layer are
+ * drawn.
+ *
+ * (celx, cely)부터 시작하는 맵 칸들을 화면의 (sx, sy)에 그린다. celw와 celh는
+ * 맵 전체 크기가 기본값이다. 레이어를 주면 그래픽 플래그에 그 레이어가 들어
+ * 있는 스프라이트만 그린다.
+ */
 static int pico8_map(lua_State *L)
 {
     int celx = fix32_to_int(luaL_optnumber(L, 1, 0));
@@ -677,6 +1024,13 @@ static int pico8_map(lua_State *L)
     return 0;
 }
 
+/*
+ * mget(x, y) — the sprite number in a map cell.
+ *
+ * Reads the map cell and returns the sprite number stored there.
+ *
+ * 맵 칸을 읽어 그 자리에 저장된 스프라이트 번호를 돌려준다.
+ */
 static int pico8_mget(lua_State *L)
 {
     int col = fix32_to_int(luaL_checknumber(L, 1));
@@ -685,6 +1039,13 @@ static int pico8_mget(lua_State *L)
     return 1;
 }
 
+/*
+ * mset(x, y, v) — write a sprite number into a map cell.
+ *
+ * Cells outside the map are ignored.
+ *
+ * 맵 밖의 칸은 무시된다.
+ */
 static int pico8_mset(lua_State *L)
 {
     int col = fix32_to_int(luaL_checknumber(L, 1));
@@ -697,6 +1058,13 @@ static int pico8_mset(lua_State *L)
     return 0;
 }
 
+/*
+ * sprite_pixel(spr, px, py) — the colour of one pixel of a sprite.
+ *
+ * Reads the 8x8 sprite out of the sprite sheet.
+ *
+ * 스프라이트 시트에서 8x8 스프라이트의 픽셀 하나를 읽는다.
+ */
 static uint8_t sprite_pixel(uint8_t spr, int px, int py)
 {
     if (px < 0 || px > 7 || py < 0 || py > 7) return 0;
@@ -708,6 +1076,18 @@ static uint8_t sprite_pixel(uint8_t spr, int px, int py)
     return byte & 0x0f;
 }
 
+/*
+ * tline(...) — walk a line across the map and draw the tiles it passes.
+ *
+ * tline(x0, y0, x1, y1, mx, my [, mdx, mdy [, layer]]) draws the map tiles
+ * along a line, where (mx, my) is the map coordinate the line starts in
+ * and (mdx, mdy) how far it moves per step.  tline(bits) switches between
+ * map cells (8 pixels) and pixels.
+ *
+ * tline(x0, y0, x1, y1, mx, my [, mdx, mdy [, layer]])는 선을 따라 만나는
+ * 맵 타일을 그린다. (mx, my)는 선이 시작하는 맵 좌표이고 (mdx, mdy)는 한 걸음
+ * 마다 이동하는 거리다. tline(bits)는 맵 칸(8픽셀)과 픽셀 단위를 바꾼다.
+ */
 static int pico8_tline(lua_State *L)
 {
     if (lua_gettop(L) == 1 && lua_isnumber(L, 1)) {
@@ -805,6 +1185,17 @@ static int pico8_tline(lua_State *L)
     return 0;
 }
 
+/*
+ * getRRectCutAmount(radius, row) — how many pixels a rounded corner cuts off.
+ *
+ * The first five radii use a simple straight cut; the larger ones use the
+ * values PICO-8 uses, so that the corners look the same as on the real
+ * machine.  Everything above that is a circle.
+ *
+ * 앞의 다섯 반지름은 단순한 직선 절단으로 처리하고, 그보다 큰 것은 실제
+ * PICO-8과 같은 값을 써서 모서리 모양이 원본과 같게 한다. 그보다 큰 것은
+ * 원으로 계산한다.
+ */
 static int getRRectCutAmount(int radius, int row)
 {
     if (radius == 6) { static int cuts[] = {5,3,2,1,1,0}; return (row < 6) ? cuts[row] : 0; }
@@ -830,6 +1221,16 @@ static int getRRectCutAmount(int radius, int row)
     }
 }
 
+/*
+ * rrect(x, y, w, h, radius, color) — draw a rectangle with rounded corners.
+ *
+ * The rectangle is w x h pixels with its top left corner at (x, y).  The
+ * radius is capped at half of the smaller side, so a radius of 0 gives a
+ * plain rectangle.
+ *
+ * 사각형은 (x, y)를 왼쪽 위로 하는 w x h 픽셀이다. 반지름은 짧은 변의 절반까지만
+ * 가능하므로, 반지름이 0이면 그냥 사각형이 된다.
+ */
 static int pico8_rrect(lua_State *L)
 {
     int x = fix32_to_int(luaL_checknumber(L, 1));
@@ -875,6 +1276,16 @@ static int pico8_rrect(lua_State *L)
     return 0;
 }
 
+/*
+ * rrectfill(x, y, w, h, radius, color) — fill a rectangle with rounded
+ * corners.
+ *
+ * The rectangle is w x h pixels with its top left corner at (x, y).  The
+ * radius is capped at half of the smaller side.
+ *
+ * 사각형은 (x, y)를 왼쪽 위로 하는 w x h 픽셀이다. 반지름은 짧은 변의 절반까지만
+ * 가능하다.
+ */
 static int pico8_rrectfill(lua_State *L)
 {
     int x = fix32_to_int(luaL_checknumber(L, 1));
@@ -911,13 +1322,23 @@ static int pico8_rrectfill(lua_State *L)
     return 0;
 }
 
+/*
+ * flip() — flip the screen.
+ *
+ * PICO-8 flips the draw buffer, syncs it to the screen and processes the
+ * input.  This emulator draws directly into the screen buffer and reads the
+ * input once per frame, so there is nothing left to do here.
+ *
+ * PICO-8은 드로우 버퍼를 뒤집고 화면에 반영한 뒤 입력을 처리한다. 이
+ * 에뮬레이터는 화면 버퍼에 직접 그리고 입력을 프레임마다 한 번 읽으므로,
+ * 여기서 할 일이 없다.
+ */
 static int pico8_flip(lua_State *L)
 {
     /* In PICO-8, flip() flips the draw buffer, syncs to frame, and processes input.
        In headless mode or normal mode with our frame-driven loop, this is a no-op. */
     return 0;
 }
-
 
 /* ------------------------------------------------------------------ *
  *  Registration

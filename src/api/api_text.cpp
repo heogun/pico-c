@@ -25,13 +25,15 @@
 #include "api_internal.h"
 
 /*
-** Advance in pixels of one charset byte when printing, measured on the
-** oracle with print(chr(c)) for every c: ASCII and the small funny-font
-** glyphs (16..127) take 4px, everything from 128 up -- the wide graphics
-** glyphs, emoji, hiragana and katakana -- takes 8px, and the control codes
-** 0..15 don't move the cursor at all. Tab and newline are cursor moves and
-** are handled by the caller.
-*/
+ * print_advance(c) — how many pixels a character moves the cursor.
+ *
+ * The glyphs 16..127 are the small ones and take 4 pixels, everything from
+ * 128 up (the wide graphics glyphs, the emoji and the Japanese kana) takes
+ * 8 pixels, and the control codes 0..15 do not move the cursor at all.
+ *
+ * 글자 16~127은 작은 글자라 4픽셀, 128 이상(넓은 그래픽 글자, 이모지, 일본어
+ * 가나/카나)은 8픽셀을 차지한다. 제어 코드 0~15는 커서를 전혀 움직이지 않는다.
+ */
 static int print_advance(uint8_t c)
 {
     if (c >= 128) return 8;
@@ -67,6 +69,15 @@ typedef struct {
     int invert, wide, tall, pinball;
 } print_state;
 
+/*
+ * hex_digit(c) — the value of a hex digit, or -1.
+ *
+ * Only the lower case letters a..f count; everything else is invalid and
+ * the caller turns it into black.
+ *
+ * 소문자 a..f만 값이 있고, 나머지는 잘못된 숫자다. 호출자는 그것을 검은색으로
+ * 바꾼다.
+ */
 static int hex_digit(uint8_t c)
 {
     if (c >= '0' && c <= '9') return c - '0';
@@ -74,7 +85,14 @@ static int hex_digit(uint8_t c)
     return -1;
 }
 
-/* Draw one glyph at the cursor and move past it. */
+/*
+ * print_emit(st, c, draw) — put one glyph on the screen and step over it.
+ *
+ * When draw is zero the glyph is only measured, which is what the shell
+ * needs to know how wide a string is.
+ *
+ * draw가 0이면 글자를 그리지 않고 폭만 잰다. 셸이 문자열의 폭을 알 때 쓴다.
+ */
 static void print_emit(print_state *st, uint8_t c, int draw)
 {
     if (draw) {
@@ -88,8 +106,18 @@ static void print_emit(print_state *st, uint8_t c, int draw)
     st->cx += adv;
 }
 
-/* Walk a p8scii string, updating the cursor and (when draw is set) painting
-   the screen. */
+/*
+ * print_walk(text, st, draw) — run through a p8scii string.
+ *
+ * The string is not plain text: its first 16 bytes are control codes that
+ * move the cursor, change the colours or repeat a character.  This function
+ * is the interpreter of those codes; it updates the cursor in st and, when
+ * draw is set, paints the screen.
+ *
+ * 문자열은 평범한 텍스트가 아니다. 앞의 16바이트는 커서를 움직이거나 색을
+ * 바꾸거나 글자를 반복하는 제어 코드다. 이 함수가 그 코드를 해석한다. st의
+ * 커서를 갱신하고, draw가 켜져 있으면 화면에도 그린다.
+ */
 static void print_walk(const char *text, print_state *st, int draw)
 {
     for (int i = 0; text[i]; ) {
@@ -206,6 +234,20 @@ static void print_walk(const char *text, print_state *st, int draw)
     }
 }
 
+/*
+ * print(text, ...) — write text on the screen.
+ *
+ * print(text)                 writes at the cursor
+ * print(text, x, y)           writes at (x, y)
+ * print(text, x, y, color)     writes at (x, y) in that colour
+ * print(text, color)          writes at the cursor in that colour
+ *
+ * The text is p8scii, so it can contain control codes.  The function returns
+ * the x coordinate the cursor ended up at.
+ *
+ * 텍스트는 p8scii이므로 제어 코드를 담을 수 있다. 커서가 멈춘 x 좌표를
+ * 돌려준다.
+ */
 static int pico8_print(lua_State *L)
 {
     const char *text = luaL_checkstring(L, 1);
@@ -255,6 +297,19 @@ static int pico8_print(lua_State *L)
     return 1;
 }
 
+/*
+ * printh(text, [filename, [overwrite, [save_to_desktop]]]) — print text to
+ * the host.
+ *
+ * Without a filename the text goes to the standard output.  With the
+ * filename "@clip" it goes to the clipboard of the host.  With a real
+ * filename the text is appended to that file, or written over it when
+ * overwrite is true.
+ *
+ * 파일명이 없으면 표준 출력으로 나간다. 파일명이 "@clip"이면 호스트의
+ * 클립보드로 간다. 실제 파일명이면 그 파일에 덧붙이고, overwrite가 참이면
+ * 덮어쓴다.
+ */
 static int pico8_printh(lua_State *L)
 {
     size_t msglen = 0;
@@ -303,6 +358,15 @@ static int pico8_printh(lua_State *L)
     return 0;
 }
 
+/*
+ * assert(value, [message]) — stop the cart when the value is false.
+ *
+ * Raises a Lua error, which the host turns into the red error screen with
+ * the position of the failing line.
+ *
+ * Lua 에러를 올리고, 호스트가 그것을 실패한 줄의 위치와 함께 빨간 오류
+ * 화면으로 바꾼다.
+ */
 static int pico8_assert(lua_State *L)
 {
     if (!lua_toboolean(L, 1))
@@ -311,6 +375,15 @@ static int pico8_assert(lua_State *L)
     return 1;
 }
 
+/*
+ * sub(text, start, [end]) — a part of a string.
+ *
+ * The positions are 1 based, like in Lua.  A range outside the string gives
+ * an empty string instead of an error.
+ *
+ * 위치는 Lua처럼 1부터 시작한다. 문자열 밖의 범위를 주면 에러가 아니라 빈
+ * 문자열을 돌려준다.
+ */
 static int pico8_sub(lua_State *L)
 {
     size_t len;
@@ -327,12 +400,19 @@ static int pico8_sub(lua_State *L)
 }
 
 /*
-** ord(s, [i, [count]]) -- shadows z8lua's version, which returns no values
-** at all where PICO-8 returns nil. Measured on the oracle: a position past
-** the end (or before 1) yields nil, a non-string non-number argument yields
-** nil, a count below 1 yields nothing, and numbers are coerced to strings
-** (ord(5) is 53, the code of "5").
-*/
+ * ord(text, [position, [count]]) — the byte values of a string.
+ *
+ * Shadows the version of z8lua, which returns nothing where PICO-8 returns
+ * nil.  Measured on the oracle: a position past the end (or before 1)
+ * yields nil, a non-string non-number argument yields nil, a count below 1
+ * yields nothing, and numbers are coerced to strings (ord(5) is 53, the
+ * code of "5").
+ *
+ * z8lua의 같은 이름을 가린다. z8lua는 PICO-8이 nil을 돌려주는 자리에서 아무것도
+ * 돌려주지 않는다. 오라클에서 측정한 값: 끝을 넘거나 1보다 작은 위치는 nil,
+ * 문자열도 숫자도 아닌 인자는 nil, 1보다 작은 개수는 아무것도 돌려주지 않고,
+ * 숫자는 문자열로 바뀐다(ord(5)는 "5"의 코드인 53).
+ */
 static int pico8_ord(lua_State *L)
 {
     size_t len;
@@ -360,6 +440,15 @@ static int pico8_ord(lua_State *L)
     return count;
 }
 
+/*
+ * pack(...) — a table with the arguments in it.
+ *
+ * The table has an "n" field with the number of arguments, like the Lua
+ * 5.1 table.pack().
+ *
+ * 인자들을 담은 테이블을 돌려준다. Lua 5.1의 table.pack()처럼 "n" 필드에
+ * 인자의 개수가 들어 있다.
+ */
 static int pico8_pack(lua_State *L)
 {
     int n = lua_gettop(L);
@@ -372,7 +461,6 @@ static int pico8_pack(lua_State *L)
     lua_setfield(L, -2, "n");
     return 1;
 }
-
 
 /* ------------------------------------------------------------------ *
  *  Registration

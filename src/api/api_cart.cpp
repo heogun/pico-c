@@ -20,6 +20,15 @@
 static double pico8_dmem[64] = {0};
 static char pico8_data_id[256] = {0};
 
+/*
+ * pico8_data_save() — write the data area of the cart to its file.
+ *
+ * The 0x4300 bytes of the data area are stored next to the cartridge, so
+ * that the next run of the cart finds them again.
+ *
+ * 데이터 영역의 0x4300 바이트를 카트 파일 옆에 저장한다. 다음에 카트를
+ * 실행할 때 다시 읽히도록.
+ */
 static void pico8_data_save(void)
 {
     if (!pico8_data_id[0]) return;
@@ -31,6 +40,16 @@ static void pico8_data_save(void)
     fclose(f);
 }
 
+/*
+ * cartdata() — the persistent data of the cart.
+ *
+ * Returns a table of 64 numbers that the cart can use to remember things
+ * between runs.  The table is written to the file of the cart when the
+ * cart stops.
+ *
+ * 카트가 실행을 넘어서 기억할 수 있는 64개 숫자의 테이블을 돌려준다. 카트가
+ * 멈추면 그 테이블이 카트 파일에 저장된다.
+ */
 static int pico8_cartdata(lua_State *L)
 {
     const char *id = (lua_gettop(L) >= 1 && !lua_isnil(L, 1)) ? lua_tostring(L, 1) : "";
@@ -54,6 +73,13 @@ static int pico8_cartdata(lua_State *L)
     return 1;
 }
 
+/*
+ * dget(index) — one number of the persistent data.
+ *
+ * index에서 0부터 센다.
+ *
+ * index는 0부터 센다.
+ */
 static int pico8_dget(lua_State *L)
 {
     int idx = fix32_to_int(luaL_checknumber(L, 1));
@@ -62,6 +88,13 @@ static int pico8_dget(lua_State *L)
     return 1;
 }
 
+/*
+ * dset(index, value) — write one number of the persistent data.
+ *
+ * index에서 0부터 센다.
+ *
+ * index는 0부터 센다.
+ */
 static int pico8_dset(lua_State *L)
 {
     int idx = fix32_to_int(luaL_checknumber(L, 1));
@@ -73,12 +106,27 @@ static int pico8_dset(lua_State *L)
     return 0;
 }
 
+/*
+ * path_has_ext(path, extension) — does the path end with that extension?
+ *
+ * 경로가 그 확장자로 끝나는가?
+ */
 static bool path_has_ext(const std::string &p, const char *ext)
 {
     size_t n = strlen(ext);
     return p.size() >= n && p.compare(p.size() - n, n, ext) == 0;
 }
 
+/*
+ * save(filename) — write the cart to a file.
+ *
+ * Without a filename the cart is saved under its own name.  The file gets
+ * a .p8 extension unless it already has one, and a .p8.png file is written
+ * when the name ends in .png.
+ *
+ * 파일명이 없으면 카트를 자기 이름으로 저장한다. 확장자가 없으면 .p8을 붙이고,
+ * 이름이 .png로 끝나면 .p8.png 파일을 쓴다.
+ */
 static int pico8_save(lua_State *L)
 {
     std::string path;
@@ -102,6 +150,15 @@ static int pico8_save(lua_State *L)
     return 1;
 }
 
+/*
+ * load(filename) — load a cartridge and start it.
+ *
+ * The cartridge is loaded at the end of the frame, so the running cart can
+ * ask for a new one.
+ *
+ * 카트는 프레임 끝에 불러와지므로, 실행 중인 카트가 새 카트를 요청할 수
+ * 있다.
+ */
 static int pico8_load(lua_State *L)
 {
     const char *filename   = NULL;
@@ -116,6 +173,17 @@ static int pico8_load(lua_State *L)
     return 1;
 }
 
+/*
+ * reload(destination, source, length, [filename]) — copy a block of memory
+ * back into the cartridge.
+ *
+ * Copies length bytes from the source address to the destination address.
+ * Without a filename the copy goes into the cartridge that is running, with
+ * a filename into that file.
+ *
+ * source 주소에서 destination 주소로 length 바이트를 복사한다. 파일명이 없으면
+ * 실행 중인 카트에, 있으면 그 파일에 복사한다.
+ */
 static int pico8_reload(lua_State *L)
 {
     int dest = fix32_to_int(luaL_optnumber(L, 1, 0));
@@ -127,6 +195,16 @@ static int pico8_reload(lua_State *L)
     return 0;
 }
 
+/*
+ * cstore(destination, source, length, [filename]) — copy a block of memory
+ * into a cartridge file.
+ *
+ * Writes length bytes from the source address to the file.  Without a
+ * filename the cartridge that is running is written.
+ *
+ * source 주소의 length 바이트를 파일에 쓴다. 파일명이 없으면 실행 중인 카트를
+ * 쓴다.
+ */
 static int pico8_cstore(lua_State *L)
 {
     int dest = fix32_to_int(luaL_optnumber(L, 1, 0));
@@ -138,6 +216,13 @@ static int pico8_cstore(lua_State *L)
     return 0;
 }
 
+/*
+ * run(filename) — load a cartridge and start it.
+ *
+ * The cartridge is loaded at the end of the frame.
+ *
+ * 카트는 프레임 끝에 불러와진다.
+ */
 static int pico8_run(lua_State *L)
 {
     const char *param = NULL;
@@ -149,6 +234,13 @@ static int pico8_run(lua_State *L)
     return 0;
 }
 
+/*
+ * reset() — start the cart from the top again.
+ *
+ * The cart is reloaded and init() runs again; the persistent data stays.
+ *
+ * 카트를 다시 불러와 init()을 다시 실행한다. 영속 데이터는 그대로 남는다.
+ */
 static int pico8_reset(lua_State *L)
 {
     (void)L;
@@ -156,13 +248,19 @@ static int pico8_reset(lua_State *L)
     return 0;
 }
 
+/*
+ * stop() — stop the cart.
+ *
+ * The host goes back to the shell.
+ *
+ * 호스트가 셸로 돌아간다.
+ */
 static int pico8_stop(lua_State *L)
 {
     (void)L;
     pico8_vm_halted = 1;
     return 0;
 }
-
 
 /* ------------------------------------------------------------------ *
  *  Registration

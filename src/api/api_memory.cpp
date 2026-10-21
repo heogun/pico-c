@@ -15,6 +15,15 @@
 
 #include "api_internal.h"
 
+/*
+ * peek(address) — the byte at an address.
+ *
+ * Reads the cart's memory.  Addresses above the 64KB of RAM are wrapped
+ * around, which is what PICO-8 does.
+ *
+ * 카트의 메모리를 읽는다. 64KB를 넘는 주소는 되돌아간다. 실제 PICO-8도
+ * 그래서한다.
+ */
 static int pico8_peek(lua_State *L)
 {
     uint16_t addr = fix32_to_uint16(luaL_checknumber(L, 1));
@@ -27,6 +36,13 @@ static int pico8_peek(lua_State *L)
     return len;
 }
 
+/*
+ * poke(address, value) — write a byte into the memory.
+ *
+ * Only the lowest 8 bits of the value are written.
+ *
+ * 값의 하위 8비트만 쓴다.
+ */
 static int pico8_poke(lua_State *L)
 {
     uint16_t addr = fix32_to_uint16(luaL_checknumber(L, 1));
@@ -38,6 +54,14 @@ static int pico8_poke(lua_State *L)
     return 0;
 }
 
+/*
+ * peek2(address) — the 16 bit word at an address.
+ *
+ * The word is read little endian, so the byte at the address is the low
+ * half of the result.
+ *
+ * 워드는 리틀 엔디언으로 읽는다. 즉 그 주소의 바이트가 결과의 하위 절반이다.
+ */
 static int pico8_peek2(lua_State *L)
 {
     uint16_t addr = fix32_to_uint16(luaL_checknumber(L, 1));
@@ -52,6 +76,13 @@ static int pico8_peek2(lua_State *L)
     return len;
 }
 
+/*
+ * poke2(address, value) — write a 16 bit word into the memory.
+ *
+ * The low byte goes to the address, the high byte to the address after it.
+ *
+ * 낮은 바이트가 그 주소에, 높은 바이트가 그 다음 주소에 들어간다.
+ */
 static int pico8_poke2(lua_State *L)
 {
     uint16_t addr = fix32_to_uint16(luaL_checknumber(L, 1));
@@ -65,6 +96,13 @@ static int pico8_poke2(lua_State *L)
     return 0;
 }
 
+/*
+ * peek4(address) — the 32 bit word at an address.
+ *
+ * Read little endian, like peek2().
+ *
+ * 리틀 엔디언으로 읽는다. peek2()와 같다.
+ */
 static int pico8_peek4(lua_State *L)
 {
     uint16_t addr = fix32_to_uint16(luaL_checknumber(L, 1));
@@ -80,6 +118,13 @@ static int pico8_peek4(lua_State *L)
     return len;
 }
 
+/*
+ * poke4(address, value) — write a 32 bit word into the memory.
+ *
+ * Four bytes, lowest first.
+ *
+ * 네 바이트를 낮은 쪽부터 쓴다.
+ */
 static int pico8_poke4(lua_State *L)
 {
     uint16_t addr = fix32_to_uint16(luaL_checknumber(L, 1));
@@ -95,6 +140,15 @@ static int pico8_poke4(lua_State *L)
     return 0;
 }
 
+/*
+ * memcpy(destination, source, length) — copy a block of memory.
+ *
+ * Copies length bytes from the source address to the destination address.
+ * Both wrap around at the end of the RAM.
+ *
+ * source 주소에서 destination 주소로 length 바이트를 복사한다. 두 주소 모두
+ * RAM 끝에서 되돌아간다.
+ */
 static int pico8_memcpy(lua_State *L)
 {
     uint16_t dst = fix32_to_uint16(luaL_checknumber(L, 1));
@@ -107,6 +161,13 @@ static int pico8_memcpy(lua_State *L)
     return 0;
 }
 
+/*
+ * memset(destination, value, length) — fill a block of memory.
+ *
+ * Writes the byte value length times, starting at the destination address.
+ *
+ * destination 주소부터 value 바이트를 length번 쓴다.
+ */
 static int pico8_memset(lua_State *L)
 {
     uint16_t dst = fix32_to_uint16(luaL_checknumber(L, 1));
@@ -117,7 +178,6 @@ static int pico8_memset(lua_State *L)
     if (len) memset(&pico8_ram[dst], val, len);
     return 0;
 }
-
 
 /* ------------------------------------------------------------------ *
  *  Registration

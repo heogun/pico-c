@@ -11,6 +11,15 @@
 
 #include "api_internal.h"
 
+/*
+ * sfx(id, [channel, [offset, [length]]]) — play a sound effect.
+ *
+ * Starts the sound effect id on a channel.  The channel defaults to 0,
+ * the offset and the length to the whole effect.
+ *
+ * 채널에서 효과음 id를 재생한다. 채널의 기본값은 0이고, 오프셋과 길이는
+ * 효과음 전체가 기본값이다.
+ */
 static int pico8_sfx(lua_State *L)
 {
     int n = (int)fix32_to_int(luaL_checknumber(L, 1));
@@ -25,6 +34,15 @@ static int pico8_sfx(lua_State *L)
     return 0;
 }
 
+/*
+ * music(id, [fade, [channel_mask, [fade_out]]]) — play a song.
+ *
+ * Starts the song id.  The fade is the length of the fade in, the channel
+ * mask says which channels the song may use.
+ *
+ * song id를 재생한다. fade는 페이드 인 길이이고, channel mask는 song이 사용할
+ * 수 있는 채널을 정한다.
+ */
 static int pico8_music(lua_State *L)
 {
     int n = (int)fix32_to_int(luaL_optnumber(L, 1, -1));
@@ -35,7 +53,6 @@ static int pico8_music(lua_State *L)
     }
     return 0;
 }
-
 
 /* ------------------------------------------------------------------ *
  *  Registration
