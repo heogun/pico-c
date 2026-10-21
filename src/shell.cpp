@@ -4,6 +4,10 @@
  * exactly like the rest of the fantasy console.  The shell provides a
  * blinking prompt, command history, tab completion and the usual set of
  * PICO-8 host commands (load/save/run/dir/cd/...).
+ *
+ * 부팅 화면은 나머지 판타지 콘솔과 똑같이 내장 4x6 폰트로 그린다(로고는
+ * 확대한다). 셸은 깜빡이는 프롬프트, 명령 히스토리, 탭 완성, 그리고 PICO-8의
+ * (호스트 명령 load/save/run/dir/cd/...)을 제공한다.
  */
 
 #include <stdio.h>

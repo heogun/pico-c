@@ -1,3 +1,27 @@
+/*
+ * cart.cpp — the cartridge files on disk.
+ *
+ * A PICO-8 cartridge is a .p8 file: a text section with the Lua source
+ * and a binary section with 0x4300 bytes of data.  The same content can
+ * also live in a .p8.png image, where the code section is compressed with
+ * PXA.  This file reads both and writes both.
+ *
+ * PICO-8 카트리지는 .p8 파일이다: 텍스트 섹션에 Lua 소스가, 바이너리 섹션에
+ * 0x4300 바이트의 데이터가 있다. 같은 내용을 .p8.png 이미지로도 담을 수 있고,
+ * 그때는 코드 섹션이 PXA로 압축된다. 이 파일은 둘 다 읽고 둘 다 쓴다.
+ *
+ * The data section is a mixture of several things: the sprite sheet, the
+ * map, the graphics flags, the songs and the sound effects, and the data
+ * the cart keeps for itself.  The writer compares every part with its
+ * default and leaves the parts that did not change out of the file, so a
+ * saved cart stays as small as the real PICO-8 keeps it.
+ *
+ * 데이터 섹션은 여러 가지가 섞여 있다: 스프라이트 시트, 맵, 그래픽 플래그,
+ * song과 효과음, 그리고 카트가 자기 몫으로 두는 데이터. 쓰는 쪽은 각 부분을
+ * 기본값과 비교해 바뀐 부분만 파일에 남기므로, 저장한 카트가 실제 PICO-8이
+ * 만드는 만큼 작게 유지된다.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

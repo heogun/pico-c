@@ -20,6 +20,8 @@
 ** prints "ムˇぬ" because those are the glyphs for bytes 237,149,156.
 **
 ** The tables come from tools/gen_charset.py.
+**
+** 테이블은 tools/gen_charset.py에서 나왔다.
 */
 
 #include <cstring>

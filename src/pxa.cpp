@@ -41,6 +41,28 @@
 	The float-based `score = i * 256 / bit_cost` integer division of the
 	original is kept untouched: it decides *which* blocks win, so changing it
 	would change the output.
+
+	.P8.png 카트리지 형식의 PXA 코드 압축.
+
+	Lexaloffle Games LLP의 공식 구현에서 가져왔다:
+
+		pxa compression snippets for PICO-8 cartridge format (as of 0.2.4c)
+		author: joseph@lexaloffle.com
+		Copyright (c) 2020-22  Lexaloffle Games LLP
+		https://github.com/dansanderson/lexaloffle (pxa_compress_snippets.c)
+
+	Lexaloffle이 MIT 라이선스로 공개했다.
+
+	이 버전은 C++로 옮긴 것으로, 압축 스트림이 오라클의 것과 바이트 단위로
+	같게 유지된다(그래서 pico-c가 저장한 카트가 실제 PICO-8에서도 똑같이
+	불러와지고, 두 writer가 바이트까지 같게 쓴다). 바뀐 것은 이것뿐이다:
+
+	  - `codo_malloc`/`codo_free` -> std::vector (새어 나가는 정적 힙 없음)
+	  - 정적 해시 테이블이 함수 안의 상태가 됨
+	  - `char *modified_code`의 이름이 바뀜(사실은 입력의 바꿀 수 있는 복사본)
+
+	원본의 float 기반 `score = i * 256 / bit_cost` 정수 나눗셈은 그대로 뒀다.
+	이것이 *어떤* 블록이 이기는지를 정하므로, 손대면 출력이 달라진다.
 */
 
 #include <stdlib.h>

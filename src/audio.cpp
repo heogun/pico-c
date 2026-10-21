@@ -9,6 +9,16 @@
  *     0..15 where 8..15 are custom instruments, volume 0..7, effect 0..7);
  *   - a note lasts `speed` * (183 / 22050) seconds;
  *   - pitch 0 is C-0 and pitch 33 is A (440 Hz).
+ *
+ * 음표의 인코딩, 박자, 효과 동작은 PICO-8 자체의 데이터 배치(그리고 zepto8
+ * 프로젝트가 측정한 공식)를 따른다:
+ *
+ *   - RAM에 효과음 하나는 68바이트다: 32개 음표 * 2바이트(LSB 우선) 다음에
+ *     편집기 모드, 속도, 루프 시작, 루프 끝이 온다.
+ *   - 음표 하나는 w2-w1-pppppp / c-eee-vvv-w3 꼴이다(피치 0..63, 파형 0..15이며
+ *     8..15는 사용자 정의 악기, 음량 0..7, 효과 0..7).
+ *   - 음표 하나는 `speed` * (183 / 22050) 초 동안 이어진다.
+ *   - 피치 0은 C-0이고 피치 33은 A(440Hz)다.
  */
 #include <math.h>
 #include <stdio.h>
