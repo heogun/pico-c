@@ -40,9 +40,9 @@ int                       g_hist_pos = -1;
 std::string               g_draft;
 
 /* The cart that is loaded.  올라와 있는 카트. */
-std::string               g_cart_path;
-std::string               g_cart_name;
-std::string               g_source;
+extern std::string               g_cart_path;
+extern std::string               g_cart_name;
+extern std::string               g_source;
 int                       g_has_cart = 0;
 
 /* The frame counter, used for the blinking cursor.  깜빡이는 커서용. */
