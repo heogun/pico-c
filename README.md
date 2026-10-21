@@ -83,6 +83,38 @@ platforms/macos/oracle.sh            # compare every cart
 platforms/macos/oracle.sh --record   # refresh tests/expected/
 ```
 
+## Source layout
+
+The sources are split so that a change stays in one place.
+
+| Path | Content |
+|------|---------|
+| `src/pico8.h` | the umbrella header; it includes the eight subsystem headers |
+| `src/pico8_core.h` | the machine constants, the RAM map and the fixed point helpers |
+| `src/pico8_gfx.h` | the screen: rendering, pixels, glyphs, palette |
+| `src/pico8_input.h` | the buttons, the mouse and the devkit keyboard |
+| `src/pico8_audio.h` | starting and stopping the sound |
+| `src/pico8_cart.h` | reading and writing the cartridge files |
+| `src/pico8_console.h` | the boot splash, the shell and the pause menu |
+| `src/pico8_vm.h` | the bridge to the Lua virtual machine |
+| `src/pico8_charset.h` | between PICO-8's font codes and UTF-8 |
+| `src/api/` | the Lua API, one module per subsystem, each with its own table |
+| `src/api/api_registry.cpp` | calls the registration function of every module |
+| `src/cart.cpp` | the .p8 and .p8.png files, the PXA and `:c:` compressors |
+| `src/pxa.cpp` | the PXA compressor (the code of a .p8.png cartridge) |
+| `src/tokens.cpp` | the token counter that guards the 8192 token limit |
+| `src/charset.cpp` | the conversion between charset bytes and UTF-8 |
+| `src/gfx.cpp`, `src/input.cpp`, `src/memory.cpp` | the host side of the screen, the buttons and the RAM |
+| `src/audio.cpp` | the synthesiser and the music sequencer |
+| `src/shell.cpp` | the boot splash, the command shell and the pause menu |
+| `src/vm.cpp` | the Lua VM, the cart callbacks and the console evaluation |
+| `src/main.cpp` | the host loop: the window, the events and the frame timing |
+
+Every function carries a doc comment in English and in Korean.  The
+comments at the top of a file describe the file as a whole; the comment
+above a function says what it does, which arguments it takes and what it
+returns.
+
 
 ## Controls
 
