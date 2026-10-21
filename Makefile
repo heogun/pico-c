@@ -73,6 +73,9 @@ endif
 
 CXXFLAGS ?= -O2 -Wall -Wextra -std=gnu++17
 CXXFLAGS += $(SDL_CFLAGS)
+# -MMD -MP writes a .d file next to every object, listing the headers it
+# used.  Without it make cannot know that a changed header needs a rebuild.
+CXXFLAGS += -MMD -MP
 LIBS     += $(SDL_LIBS) -lm
 
 # ------------------------------------------------------------------ layout --
@@ -170,3 +173,13 @@ run: $(TARGET)
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+# ----------------------------------------------------------------- includes --
+# The dependency files that -MMD -MP writes next to the objects.  They tell
+# make which header belongs to which object, so that changing a header
+# rebuilds everything that includes it.
+#
+# -MMD -MP가 오브젝트 옆에 만들어 주는 의존성 파일. 어떤 헤더가 어떤 오브젝트의
+# 일부인지 알려 주기 때문에, 헤더를 고치면 그것을 포함하는 것이 모두 다시
+# 컴파일된다.
+-include $(CPP_OBJS:.o=.d) $(Z8LUA_OBJS:.o=.d)
