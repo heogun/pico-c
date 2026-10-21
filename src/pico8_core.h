@@ -57,37 +57,37 @@ using z8::fix32;
  *  Machine dimensions
  * ------------------------------------------------------------------ */
 
-#define PICO8_RAM_SIZE     0x10000   /* the cart sees 64KB        */
-#define PICO8_SCREEN_W     128
-#define PICO8_SCREEN_H     128
+#define PICO8_RAM_SIZE     0x10000   /* the cart sees 64KB / 카트가 보는 64KB */
+#define PICO8_SCREEN_W     128       /* the screen is 128 wide / 화면 너비 */
+#define PICO8_SCREEN_H     128       /* the screen is 128 high / 화면 높이 */
 
-#define PICO8_PAL_COUNT    16
-#define PICO8_SPRITE_COUNT 256
-#define PICO8_MAP_W        128
-#define PICO8_MAP_H        64
-#define PICO8_FPS          60
+#define PICO8_PAL_COUNT    16        /* the colours of the palette / 팔레트 색 수 */
+#define PICO8_SPRITE_COUNT 256       /* the sprites of the sheet / 스프라이트 수 */
+#define PICO8_MAP_W        128       /* the map is 128 wide / 맵 너비 */
+#define PICO8_MAP_H        64        /* the map is 64 high / 맵 높이 */
+#define PICO8_FPS          60        /* the frames per second / 초당 프레임 수 */
 
 /* ------------------------------------------------------------------ *
  *  RAM map
  * ------------------------------------------------------------------ */
 
-#define PICO8_GFX_ADDR     0x0000   /* sprite sheet              */
-#define PICO8_MAP2_ADDR    0x1000   /* map, rows 32..63          */
-#define PICO8_MAP_ADDR     0x2000   /* map, rows 0..31           */
-#define PICO8_GFX_FLAGS    0x3000   /* per sprite graphics flags */
-#define PICO8_SONG_ADDR    0x3100
-#define PICO8_SFX_ADDR     0x3200
-#define PICO8_SFX_SIZE     68
-#define PICO8_USER_DATA    0x4300   /* the cartridge's data area  */
-#define PICO8_CUSTOM_FONT  0x5600
-#define PICO8_PERSISTENT   0x5e00
-#define PICO8_DRAW_STATE   0x5f00   /* cursor, camera, palette   */
-#define PICO8_HW_STATE     0x5f40   /* buttons, mouse, keyboard  */
-#define PICO8_GPIO_PINS    0x5f80
-#define PICO8_SCREEN       0x6000
-#define PICO8_EXT_MAP      0x8000
+#define PICO8_GFX_ADDR     0x0000   /* sprite sheet / 스프라이트 시트 */
+#define PICO8_MAP2_ADDR    0x1000   /* map, rows 32..63 / 맵 32~63행 */
+#define PICO8_MAP_ADDR     0x2000   /* map, rows 0..31 / 맵 0~31행 */
+#define PICO8_GFX_FLAGS    0x3000   /* per sprite graphics flags / 그래픽 플래그 */
+#define PICO8_SONG_ADDR    0x3100   /* the songs / song 영역 */
+#define PICO8_SFX_ADDR     0x3200   /* the sound effects / 효과음 영역 */
+#define PICO8_SFX_SIZE     68       /* the size of one effect / 효과음 하나 크기 */
+#define PICO8_USER_DATA    0x4300   /* the cartridge's data area / 카트 데이터 영역 */
+#define PICO8_CUSTOM_FONT  0x5600   /* a custom font / 사용자 폰트 */
+#define PICO8_PERSISTENT   0x5e00   /* the persistent data / 유지되는 데이터 */
+#define PICO8_DRAW_STATE   0x5f00   /* cursor, camera, palette / 커서, 카메라, 팔레트 */
+#define PICO8_HW_STATE     0x5f40   /* buttons, mouse, keyboard / 버튼, 마우스, 키보드 */
+#define PICO8_GPIO_PINS    0x5f80   /* the GPIO pins / GPIO 핀 */
+#define PICO8_SCREEN       0x6000   /* the screen / 화면 */
+#define PICO8_EXT_MAP      0x8000   /* the second map / 두 번째 맵 */
 
-#define PICO8_CART_DATA_SIZE  0x4300   /* size of the data area     */
+#define PICO8_CART_DATA_SIZE  0x4300   /* size of the data area / 데이터 영역 크기 */
 
 /* ------------------------------------------------------------------ *
  *  Cartridge limits
@@ -138,7 +138,11 @@ static inline fix32 fix32_from_uint8(uint8_t x)  { return fix32((int32_t)x); }
 static inline fix32 fix32_from_uint16(uint16_t x) { return fix32((int32_t)x); }
 static inline fix32 fix32_from_uint32(uint32_t x) { return fix32((int32_t)x); }
 
-/* Build a fixed point value out of two 16 bit halves, high part first. */
+/*
+ * Build a fixed point value out of two 16 bit halves, high part first.
+ *
+ * 상위 16비트와 하위 16비트 두 조각에서 고정소수 값을 만든다.
+ */
 static inline fix32 fix32_value(uint16_t hi, uint16_t lo) {
     return fix32::frombits(((int32_t)hi << 16) | (uint32_t)lo);
 }
@@ -165,17 +169,34 @@ static const uint32_t pico8_palette[PICO8_PAL_COUNT] = {
  *  Memory
  * ------------------------------------------------------------------ */
 
-/* Fill the RAM with the state a fresh PICO-8 starts in. */
+/*
+ * Fill the RAM with the state a fresh PICO-8 starts in.
+ *
+ * 새로 켠 PICO-8이 시작하는 상태로 RAM을 채운다.
+ */
 void pico8_reset_memory(void);
 
-/* Copy a cartridge image (or a raw dump) into the RAM. */
+/*
+ * Copy a cartridge image (or a raw dump) into the RAM.
+ *
+ * 카트리지 이미지(또는 raw 덤프)를 RAM에 복사한다.
+ */
 void pico8_load_memory(const uint8_t *data, uint32_t len);
 
-/* Reset the draw state (RAM 0x5f00..0x5f7f) to its default values,
-   matching PICO-8's RESET(). */
+/*
+ * Reset the draw state (RAM 0x5f00..0x5f7f) to its default values,
+ * matching PICO-8's RESET().
+ *
+ * 드로우 상태(RAM 0x5f00~0x5f7f)를 기본값으로 되돌린다. PICO-8의 RESET()과
+ * 같다.
+ */
 void pico8_reset_draw_state(void);
 
-/* The default song and the default sound effect, written into RAM. */
+/*
+ * The default song and the default sound effect, written into RAM.
+ *
+ * 기본 song과 기본 효과음을 RAM에 쓴다.
+ */
 void pico8_init_song_default(void);
 void pico8_init_sfx_default(void);
 

@@ -18,10 +18,18 @@
  *  Playback
  * ------------------------------------------------------------------ */
 
-/* Open the audio device.  Returns 0 on success. */
+/*
+ * Open the audio device.  Returns 0 on success.
+ *
+ * 오디오 장치를 연다. 성공하면 0.
+ */
 int  pico8_audio_init(void);
 
-/* Close the audio device. */
+/*
+ * Close the audio device.
+ *
+ * 오디오 장치를 닫는다.
+ */
 void pico8_audio_destroy(void);
 
 /*
@@ -31,6 +39,11 @@ void pico8_audio_destroy(void);
  * channel  the channel to play it on, 0..3
  * offset   where in the effect to start, in samples
  * length   how long to play it, in samples
+ *
+ * sfx_id   효과음 번호. 0~63
+ * channel  어느 채널에서 연주할지. 0~3
+ * offset   효과음의 몇 샘플부터 시작할지
+ * length   몇 샘플 길이 연주할지
  */
 void pico8_audio_sfx(int sfx_id, int channel, int offset, int length);
 
@@ -40,26 +53,46 @@ void pico8_audio_sfx(int sfx_id, int channel, int offset, int length);
  * song_id       the song, 0..63
  * fade_len      the length of the fade in, in ticks (0 for none)
  * channel_mask  which channels the song may use
+ *
+ * song_id       song 번호. 0~63
+ * fade_len      페이드인 길이(틱 단위). 0이면 없음
+ * channel_mask  song이 쓸 수 있는 채널
  */
 void pico8_audio_music(int song_id, int fade_len, int channel_mask);
 
-/* Stop everything that is playing. */
+/*
+ * Stop everything that is playing.
+ *
+ * 재생 중인 모든 소리를 멈춘다.
+ */
 void pico8_audio_stop(void);
 
 /* ------------------------------------------------------------------ *
  *  State, as stat() wants to know it
  * ------------------------------------------------------------------ */
 
-/* The sound effect playing on a channel, or -1 when the channel is quiet. */
+/*
+ * The sound effect playing on a channel, or -1 when the channel is quiet.
+ *
+ * 그 채널에서 연주 중인 효과음 번호. 조용하면 -1.
+ */
 int pico8_audio_sfx_id(int channel);
 
-/* The note of the sound effect playing on a channel, or -1. */
+/*
+ * The note of the sound effect playing on a channel, or -1.
+ *
+ * 그 채널에서 연주 중인 음 번호. 없으면 -1.
+ */
 int pico8_audio_note_num(int channel);
 
-/* The pattern of the playing song, or -1 when nothing plays. */
-int pico8_audio_music_pattern(void);        /* stat(54), or -1 */
+/*
+ * The pattern of the playing song, or -1 when nothing plays.
+ *
+ * 재생 중인 song의 패턴 번호. 아무것도 연주하지 않으면 -1.
+ */
+int pico8_audio_music_pattern(void);        /* stat(54) */
 int pico8_audio_music_count(void);          /* stat(55) */
-int pico8_audio_music_ticks(void);          /* stat(56), or -1 */
+int pico8_audio_music_ticks(void);          /* stat(56) */
 int pico8_audio_music_playing(void);        /* stat(57) */
 
 #endif /* PICO8_AUDIO_H */

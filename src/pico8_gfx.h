@@ -37,13 +37,25 @@ void pico8_render_screen(uint32_t *pixels, int pitch, int scale);
  *  Drawing helpers
  * ------------------------------------------------------------------ */
 
-/* Put a single pixel of the given colour at (x, y) on the screen. */
+/*
+ * Put a single pixel of the given colour at (x, y) on the screen.
+ *
+ * 화면의 (x, y)에 주어진 색의 픽셀 하나를 찍는다.
+ */
 void pico8_put_pixel(int x, int y, uint8_t color);
 
-/* Fill the whole screen with one colour. */
+/*
+ * Fill the whole screen with one colour.
+ *
+ * 화면 전체를 한 색으로 채운다.
+ */
 void pico8_clear_screen(uint8_t color);
 
-/* Put one charset glyph on the screen with the given colour. */
+/*
+ * Put one charset glyph on the screen with the given colour.
+ *
+ * charset 글자 하나를 주어진 색으로 화면에 찍는다.
+ */
 void pico8_draw_char(int x, int y, uint8_t ch, uint8_t color);
 
 /*
@@ -55,16 +67,32 @@ void pico8_draw_char(int x, int y, uint8_t ch, uint8_t color);
  * wide       twice as wide
  * tall       twice as high
  * pinball    PICO-8's pinball style font (wider, with a drop shadow)
+ *
+ * fg/bg      앞 글자색과 배경색
+ * has_bg     0이면 배경 없이 글자만 그린다
+ * invert     두 색을 서로 바꾼다
+ * wide       두 배 넓게
+ * tall       두 배 높게
+ * pinball    PICO-8의 핀볼체 글꼴(더 넓고 그림자가 있다)
  */
 void pico8_draw_char_text(int x, int y, uint8_t ch,
                           uint8_t fg, int has_bg, uint8_t bg,
                           int invert, int wide, int tall, int pinball);
 
-/* Put one charset glyph on the screen, scaled up by an integer factor. */
+/*
+ * Put one charset glyph on the screen, scaled up by an integer factor.
+ *
+ * charset 글자 하나를 정수 배로 확대해서 화면에 찍는다.
+ */
 void pico8_draw_char_scaled(int x, int y, uint8_t ch, uint8_t color, int scale);
 
-/* Restore the palette to its default colours (the call of pal() with no
-   arguments, and what RESET() does). */
+/*
+ * Restore the palette to its default colours (the call of pal() with no
+ * arguments, and what RESET() does).
+ *
+ * 팔레트를 기본 색으로 되돌린다(인수 없는 pal() 호출, 그리고 RESET()이 하는
+ * 일과 같다).
+ */
 void pico8_pal_reset_all(void);
 
 #endif /* PICO8_GFX_H */
