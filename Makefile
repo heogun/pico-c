@@ -90,7 +90,10 @@ TARGET         := $(BUILD_DIR)/pico-c$(EXE_SUFFIX)
 ASAN_TARGET    := $(BUILD_DIR)/pico-c-asan$(EXE_SUFFIX)
 TEST_CART      := $(ROOT)/tests/carts/test.p8
 
-CPP_SRCS := $(wildcard $(SRC_DIR)/*.cpp) $(wildcard $(SRC_DIR)/api/*.cpp)
+# The sources live in src/ itself and in the folders below it (src/api/,
+# src/shell/, ...).  Every .cpp below those folders becomes an object of the
+# same name, so the layout of src/ is mirrored under obj/.
+CPP_SRCS := $(wildcard $(SRC_DIR)/*.cpp) $(wildcard $(SRC_DIR)/*/*.cpp)
 CPP_OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(CPP_SRCS))
 
 Z8LUA_NAMES := lapi lcode lctype ldebug ldo ldump \
