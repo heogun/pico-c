@@ -1,6 +1,12 @@
 # pico-c 진행 상황 & TODO
 
-> 새 세션에서 이어서 진행하기 위한 문서입니다. 가장 최근 갱신: 2026-10-19 (6단계 완료)
+> 새 세션에서 이어서 진행하기 위한 문서입니다. 가장 최근 갱신: 2026-11-17
+> (2026-10-22 소스 구조 리팩터링 반영 — §6. 작업 규약 요약은 [CLAUDE.md](CLAUDE.md))
+>
+> **파일 경로 주의**: §2~§5는 리팩터링 전에 쓰였다. 거기 나오는 옛 경로는 다음과 같이 읽을 것:
+> `src/api.cpp` → `src/api/api_*.cpp`, `src/cart.cpp` → `src/cart/cart_*.cpp`,
+> `src/shell.cpp` → `src/shell/*.cpp`, `src/pico8.h`의 선언 → `src/pico8_*.h`,
+> `cmp.sh`/`cmp_all.sh` → `platforms/macos/oracle.sh`.
 
 ---
 
@@ -33,7 +39,11 @@
 
 ```
 pico-c/
-├── src/                소스
+├── src/                소스 (상세는 §6)
+│   ├── api/            Lua API, 서브시스템별 모듈 8개 + api_registry.cpp
+│   ├── cart/           카트 읽기/쓰기/PNG/압축 해제
+│   ├── shell/          콘솔, 명령 표, 호스트 파일, 키 입력
+│   └── *.cpp, pico8_*.h  vm/audio/gfx/input/memory/charset/pxa/tokens/util/main
 ├── tools/              폰트/문자셋 생성기
 ├── tests/              테스트 카트 + 골든 트랜스크립트
 │   ├── carts/          cmp_*.p8, test.p8, 부속 파일(cstore_base.p8, loadA/B.p8, cmp.p8d)
@@ -79,8 +89,9 @@ pico-c/
 - **fresh clone 시**: macOS는 MacPorts `/opt/local`의 SDL2 필요 + `make`가 z8lua 클론(네트워크)
 
 ### 핵심 결과물
-- `src/` 11개 파일: `api.cpp`, `audio.cpp`, `cart.cpp`, `gfx.cpp`, `input.cpp`,
+- (당시) `src/` 11개 파일: `api.cpp`, `audio.cpp`, `cart.cpp`, `gfx.cpp`, `input.cpp`,
   `main.cpp`, `memory.cpp`, `pico8.h`, `shell.cpp`, `vm.cpp`, `stb_image.h`
+  → 지금은 폴더별로 분리됨 (§6)
 - **회귀 스위트 18/18 오라클 일치** (`tests/carts/cmp_*.p8` + `platforms/macos/oracle.sh`)
   (`cmp_savegen`/`cmp_savereload`/`cmp_pngsave`는 의도적 차이: PICO-8이 `-x`에서 `save()` 비활성화)
 - `API_CHECKLIST.md` 갱신됨
@@ -352,9 +363,20 @@ PICO-8은 카트의 `__lua__` 소스가 **65536바이트를 넘거나 토큰이 
       까지 오라클과 일치. `info()`의 콘솔 출력만 헤드리스에서 비교할 수 없어 그대로 둠.
 - [x] **`.p8.png` 저장** — 완료 (§3-6): 공식 PXA 압축기 이식 + 자체 PNG 인코더.
       실카트 페이로드가 PICO-8 출력과 **바이트 동일**.
-- [ ] **성능**: 픽스포인트 연산 최적화, 병목 프로파일
-- [ ] 5단계 마무리: 셸/에디터 명령 중 미구현 `edit`(내장 에디터), `splore`(온라인),
-      `keyconfig`(버튼 리맵) — 현재 "not available" 안내 출력 상태
+- [x] **소스 구조 리팩터링 + 이중 언어 문서화** — 완료 (2026-10-22, §6)
+- [ ] **리팩터링 브랜치 병합**: `refactor/split-api-and-document`(main 대비 11커밋)를
+      main에 PR/병합. 커밋 `62c20a3`/`1175c0b`는 메시지가 같으니(두 번째는 일회용
+      `tools/split_*.py` 삭제) 병합 전에 squash하거나 메시지를 고칠 것.
+- [x] **README 갱신** — 완료 (2026-11-17): "Source layout" 표를 `src/api|cart|shell/` 구조로,
+      "Console" 절에 `edit`/`menu`/`man` 추가 및 미구현 명령 목록 정정
+- [ ] **성능**: 픽스포인트 연산 최적화, 병목 프로파일 (`make asan` 외에 프로파일 빌드 없음)
+- [ ] 5단계 마무리 (셸 명령):
+  - [x] `edit` — `$EDITOR`(없으면 `vi`)로 카트 소스를 열고 종료 후 다시 로드 (커밋 `2dab3fd`).
+        PICO-8식 내장 코드/스프라이트/맵/SFX 에디터는 없음 (큰 작업, 범위 결정 필요)
+  - [~] `import` / `export` — 셸 명령은 안내 메시지 수준, 실제 PNG/WAV/HTML 내보내기 없음
+  - [~] `keyconfig` — 안내 메시지만. 버튼 리맵 저장 미구현
+  - [~] `splore` — 온라인 브라우저는 범위 밖, 로컬 `load` 안내만
+- [ ] **문법 에러 문구 패리티**: 형식은 같지만 z8lua 파서 메시지/줄 번호가 오라클과 다름 (§3-2)
 - [ ] (방해 요소) `/Applications/PICO-8.app` 자체가 멈춤 — /tmp/p8app 사본 사용 유지
 
 ---
@@ -419,3 +441,39 @@ PICO-8은 카트의 `__lua__` 소스가 **65536바이트를 넘거나 토큰이 
 ### 조사용 카트
 - `cmp_glyphord.p8` — `#`, `ord`, `sub`, `==`, 키 코드 덤프, ASCII 비교
 - `cmp_glyphbytes.p8` — 키의 raw 바이트 덤프
+
+---
+
+## 6. 소스 구조 리팩터링 (2026-10-22, 브랜치 `refactor/split-api-and-document`)
+
+동작 변경 없이 구조만 바꾼 작업. 각 단계 후 회귀 스위트 통과를 확인했다.
+최종 확인(2026-11-17, `1175c0b`): `platforms/macos/test.sh` → **45 passed, 0 failed**.
+
+| 커밋 | 내용 |
+|------|------|
+| `f07f27b` | 테스트를 `tests/`로, 빌드 의존성을 `platforms/`로. `PLATFORM=` 빌드, `build/<platform>/` 산출물 |
+| `07016d1` | `src/api.cpp`(2251줄) → `src/api/` 모듈 8개 + `api_registry.cpp` |
+| `5adc552` | `src/pico8.h` → 서브시스템 헤더 8개(`pico8_{core,gfx,input,audio,cart,console,vm,charset}.h`) + 우산 헤더. Makefile에 `-MMD -MP` |
+| `63f7742` `474933f` `fc06eea` `68e295d` | 모든 함수/파일에 영어+한국어 doc 주석. 죽은 코드(`pico8_blit_char`, `tools/split_api.sh`) 제거 |
+| `75d7cd6` | README에 소스 구조 표 |
+| `f7c05c3` | 경로/16진수 헬퍼를 `src/util.{h,cpp}`로 통합 |
+| `f19d042` | `src/shell.cpp`(1517줄) → `src/shell/` 4개 파일, 명령 디스패치를 `kShellCommands` 표로 |
+| `62c20a3` `1175c0b` | `src/cart.cpp`(1486줄) → `src/cart/` 6개 파일 + `cart_internal.h`, 일회용 분리 스크립트 삭제 |
+
+현재 `src/` (stb_image.h 제외 약 12,700줄):
+
+```
+src/
+├── pico8.h, pico8_*.h        공개 헤더 (우산 + 서브시스템 8개)
+├── api/                      api_{audio,cart,gfx,input,lua,memory,system,text}.cpp
+│                             api_registry.cpp, api_internal.h
+├── cart/                     cart_{read,write,png,compress,data,state}.cpp, cart_internal.h
+├── shell/                    console.cpp, commands.cpp, host.cpp, input.cpp, shell_internal.h
+├── vm.cpp audio.cpp gfx.cpp input.cpp memory.cpp main.cpp
+├── charset.cpp + charset_table.inc, font_table.inc
+├── pxa.cpp/h, tokens.cpp, util.cpp/h
+└── stb_image.h               (서드파티)
+```
+
+가장 큰 파일: `api/api_gfx.cpp`(1375줄), `audio.cpp`(961), `shell/commands.cpp`(882),
+`vm.cpp`(788). 추가 분리가 필요하면 이 순서로 검토.
