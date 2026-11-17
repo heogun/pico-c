@@ -2,7 +2,8 @@
 """wavnotes.py — read the notes back out of a .wav file.
 
 Usage: wavnotes.py FILE.wav WINDOW COUNT     the notes, window by window
-       wavnotes.py FILE.wav rms             loudness of the steady part
+       wavnotes.py FILE.wav rms [END]       loudness of the steady part (up to
+                                            sample END instead of 2600)
        wavnotes.py FILE.wav harm K          K-th harmonic / fundamental
        wavnotes.py FILE.wav peak RATIO      spectrum at RATIO * fundamental
                                             / fundamental (a second voice)
@@ -78,6 +79,8 @@ def component(samples, freq):
 def feature(samples, name, arg):
     a, b = STEADY
     if name == 'rms':
+        if arg:
+            b = int(arg)
         return math.sqrt(sum(x * x for x in samples[a:b]) / (b - a)) / 16122
     if name == 'harm':
         return component(samples, arg * FUNDAMENTAL) / component(samples, FUNDAMENTAL)

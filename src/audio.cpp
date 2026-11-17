@@ -50,6 +50,7 @@
 #define REVERB_MAX       (2 * 732 + 8)
 
 #include "buzz_table.inc"
+#include "noise_table.inc"
 
 enum {
     FX_NONE = 0, FX_SLIDE, FX_VIBRATO, FX_DROP,
@@ -287,7 +288,7 @@ static float key_to_freq(int key)
 /* ------------------------------------------------------------------ */
 
 /*
- * pico8_wave(instrument, advance, freq, noise_state, key) — one sample.
+ * pico8_wave(instrument, advance, freq, noise_state, key, inv_sr) — one sample.
  *
  * Makes the waveform of the given instrument.  The `advance` is the phase
  * of the note in cycles, and the fractional part of it is what the
@@ -296,19 +297,26 @@ static float key_to_freq(int key)
  * an organ, noise and a phaser.
  *
  * The noise instrument keeps its state in `noise_state`, because the noise
- * is a filter that remembers the last sample.  A higher key makes the
- * noise brighter.
+ * is a filter that remembers the last sample.  Its spectrum follows the
+ * one PICO-8 makes at every key (noise_table.inc, fitted at 22050Hz): a
+ * one-pole low-pass of white noise plus some of the white noise itself.
+ * At another output rate the filter is stretched and the level corrected,
+ * so that the spectrum below 11025Hz stays the same.
  *
  * 주어진 악기의 파형을 만든다. `advance`는 음의 위상(사이클 수)이고, 그
  * 소수 부분으로 파형이 만들어진다. PICO-8의 여덟 악기는 삼각파, 기울인 톱니파,
  * 톱니파, 긴 제곱파, 짧은 제곱파, 오르간, 노이즈, 페이저다.
  *
  * 노이즈 악기는 `noise_state`에 상태를 남긴다. 노이즈가 마지막 샘플을 기억하는
- * 필터이기 때문이다. 높은 음은 노이즈를 더 밝게 만든다.
+ * 필터이기 때문이다. 스펙트럼은 PICO-8이 키마다 내는 것을 따른다
+ * (noise_table.inc, 22050Hz에서 맞춤): 백색 잡음의 1차 저역 통과에 백색 잡음
+ * 자체를 조금 더한 것. 출력 속도가 다르면 필터를 늘이고 크기를 보정해
+ * 11025Hz 아래의 스펙트럼을 유지한다.
  */
 static float pico8_wave(int instrument, double advance, float freq,
-                        float *noise_state, int key)
+                        float *noise_state, int key, float inv_sr)
 {
+    (void)freq;   /* the noise follows the key, not the frequency */
     double t = advance - floor(advance);
     float ret = 0.0f;
 
@@ -340,13 +348,15 @@ static float pico8_wave(int instrument, double advance, float freq,
         return ret / 9.0f;
 
     case 6: { /* noise */
-        const float tscale = 8.858923f;
-        float scale = freq / (float)PICO8_SAMPLE_RATE * tscale;
-        float new_sample = (*noise_state + scale * ((rand() / (float)RAND_MAX) * 2.0f - 1.0f))
-                           / (1.0f + scale);
-        float factor = 1.0f - key / 63.0f;
-        *noise_state = new_sample;
-        return new_sample * 1.5f * (1.0f + factor * factor);
+        if (key < 0) key = 0;
+        if (key > 63) key = 63;
+        const float *nf = kNoiseFilter[key];
+        float stretch = (float)(PICO8_SYNTH_RATE * inv_sr);   /* 1 at 22050Hz */
+        float k = 1.0f - powf(1.0f - nf[0], stretch);
+        float r = (rand() / (float)RAND_MAX) * 2.0f - 1.0f;
+        *noise_state += k * (r - *noise_state);
+        /* white noise spreads over a wider band at a higher rate */
+        return nf[2] * sqrtf(1.0f / stretch) * (*noise_state + nf[1] * r);
     }
 
     case 7:   /* phaser (two detuned triangles) */
@@ -401,8 +411,8 @@ static int sfx_last_note(int sfx_id)
 }
 
 /*
- * note_effect(sfx_id, note_id, note, offset, offset_per_second, speed,
- *             prev_key, prev_vol, freq, volume) — apply the effect of a note.
+ * note_effect(sfx_id, note_id, note, offset, speed, prev_key, prev_vol,
+ *             freq, volume) — apply the effect of a note.
  *
  * Starts from the plain frequency and volume of the note and changes them
  * the way its effect says: the slide from the previous note, the vibrato,
@@ -410,29 +420,58 @@ static int sfx_last_note(int sfx_id)
  * four notes the note belongs to).  `offset` is the position in the sound
  * effect, in notes.
  *
+ * PICO-8 works out an effect once per tick (183 samples at 22050Hz, a
+ * note lasts `speed` ticks) and holds it until the next one, so the
+ * effects move in steps, not smoothly (measured on 0.2.7):
+ *
+ *   - slide: linear in pitch (not in frequency) from the previous key;
+ *   - vibrato: a triangle of a quarter of a semitone either way, starting
+ *     at the note's pitch and going up, one cycle per 16 ticks, a new step
+ *     every 2 ticks;
+ *   - drop, fade in, fade out: linear over the ticks of the note, so the
+ *     first tick of a fade in is silent;
+ *   - arpeggio: one step per 4 ticks (fast) or 8 ticks (slow), half that
+ *     at speed 8 and below.
+ *
+ * The vibrato and the arpeggios count the ticks from the start of the
+ * sound effect.
+ *
  * 음의 기본 주파수와 음량에서 시작해, 효과가 말하는 대로 바꾼다: 이전 음에서
  * 미끄러지는 slide, vibrato, drop, 두 fade, 그리고 음이 속한 네 음 묶음을
  * 도는 두 arp. `offset`은 효과음 안의 위치(음 단위)다.
+ *
+ * PICO-8은 효과를 틱마다(22050Hz에서 183샘플, 음 하나는 `speed` 틱) 한 번
+ * 계산하고 다음 틱까지 유지하므로, 효과는 매끄럽지 않고 계단처럼 움직인다
+ * (0.2.7 실측): slide는 주파수가 아니라 피치에 대해 선형, vibrato는 음 높이에서
+ * 시작해 위로 가는 ±1/4 반음 삼각파로 16틱에 한 주기, 2틱마다 한 계단, drop과
+ * 두 fade는 음의 틱에 대해 선형(fade in의 첫 틱은 무음), arp는 4틱(fast) 또는
+ * 8틱(slow)마다 한 계단이며 speed 8 이하에서는 그 절반. vibrato와 arp는
+ * 효과음 시작부터 틱을 센다.
  */
 static void note_effect(int sfx_id, int note_id, const struct SfxNote *note,
-                        double offset, double offset_per_second, int speed,
+                        double offset, int speed,
                         int prev_key, float prev_vol,
                         float *freq_out, float *volume_out)
 {
     float volume = note->volume / 7.0f;
     float freq   = key_to_freq(note->key);
-    double t     = offset - floor(offset);
+
+    long   tick = (long)floor(offset * speed);          /* since the start */
+    double t    = (double)(tick - (long)note_id * speed) / speed;  /* in the note */
+    if (t < 0.0) t = 0.0;
 
     switch (note->effect) {
-    case FX_SLIDE:
-        freq = (float)(key_to_freq(prev_key) * (1.0 - t) + freq * t);
+    case FX_SLIDE: {
+        double key = prev_key + (note->key - prev_key) * t;
+        freq = 440.0f * exp2f((float)((key - 33.0) / 12.0));
         if (prev_vol > 0.0f)
             volume = (float)(prev_vol * (1.0 - t) + volume * t);
         break;
+    }
     case FX_VIBRATO: {
-        /* half a semitone, 7.5 cycles per note (measured) */
-        double v = fabs(fmod(7.5 * offset / offset_per_second, 1.0) - 0.5) - 0.25;
-        freq = (float)(freq * (1.0 - v) + freq * 1.059463094359 * v);
+        double p = (double)((tick / 2) % 8) / 8.0;     /* a step per 2 ticks */
+        double s = p < 0.25 ? 4.0 * p : p < 0.75 ? 2.0 - 4.0 * p : 4.0 * p - 4.0;
+        freq = (float)(freq * (1.0 + 0.059463094359 * 0.25 * s));
         break;
     }
     case FX_DROP:
@@ -446,9 +485,9 @@ static void note_effect(int sfx_id, int note_id, const struct SfxNote *note,
         break;
     case FX_ARP_FAST:
     case FX_ARP_SLOW: {
-        int m = (speed <= 8 ? 32 : 16) / (note->effect == FX_ARP_FAST ? 4 : 8);
-        int n = (int)(m * 7.5 * offset / offset_per_second);
-        int arp_note = (note_id & ~3) | (n & 3);
+        long step = (note->effect == FX_ARP_FAST ? 4 : 8) / (speed <= 8 ? 2 : 1);
+        int  n = (int)((tick / step) & 3);
+        int  arp_note = (note_id & ~3) | n;
         struct SfxNote an;
         sfx_get_note(sfx_id, arp_note, &an);
         freq = key_to_freq(an.key);
@@ -531,7 +570,7 @@ static int instrument_sample(struct Channel *ch, float inv_sr,
         struct SfxNote note;
         sfx_get_note(sfx_id, note_id, &note);
         if (note.volume > 0) {
-            note_effect(sfx_id, note_id, &note, offset, offset_per_second, speed,
+            note_effect(sfx_id, note_id, &note, offset, speed,
                         in->prev_key, in->prev_vol, freq, volume);
             *wave = note.instrument;
             *key  = note.key;
@@ -635,7 +674,7 @@ static void update_sfx_state(struct Channel *ch, struct SynthParam *param,
         struct SfxNote outer = note;
         if (note.custom && outer.effect == FX_DROP)
             outer.effect = FX_NONE;            /* drop only retriggers */
-        note_effect(sfx_id, note_id, &outer, offset, offset_per_second, speed,
+        note_effect(sfx_id, note_id, &outer, offset, speed,
                     ch->prev_key, ch->prev_vol, &freq, &volume);
 
         int wave = note.instrument, key = note.key;
@@ -749,7 +788,8 @@ static float buzz_wave(const float *table, double t)
 }
 
 /*
- * voice(wave, phase, buzz, freq, noise_state, key) — one sample of a waveform.
+ * voice(wave, phase, buzz, freq, noise_state, key, inv_sr) — one sample of a
+ * waveform.
  *
  * The plain waveform comes from pico8_wave().  With buzz on, the waveforms
  * 0..5 play from the measured table (buzz_table.inc), and the phaser is
@@ -761,7 +801,7 @@ static float buzz_wave(const float *table, double t)
  * 걸린 삼각파로 만든다. 노이즈는 buzz로 바뀌지 않는다.
  */
 static float voice(int wave, double phase, int buzz, float freq,
-                   float *noise_state, int key)
+                   float *noise_state, int key, float inv_sr)
 {
     if (buzz && wave >= 0 && wave <= 5)
         return buzz_wave(kBuzzTable[wave], phase);
@@ -770,7 +810,7 @@ static float voice(int wave, double phase, int buzz, float freq,
         return (2.0f * buzz_wave(kBuzzTable[0], phase)
                 + buzz_wave(kBuzzTable[0], slow)) / 3.0f;
     }
-    return pico8_wave(wave, phase, freq, noise_state, key);
+    return pico8_wave(wave, phase, freq, noise_state, key, inv_sr);
 }
 
 /*
@@ -828,12 +868,12 @@ static float channel_sample(struct Channel *ch, float inv_sr, int *is_music)
             out = ch->noiz_value;
         } else {
             out = voice(wave, param.phi, f->buzz, param.freq,
-                        &ch->last_sample, param.key);
+                        &ch->last_sample, param.key, inv_sr);
             if (f->detune && wave != 6) {
                 ch->phi2 += detune_freq(wave, f->detune, param.freq) * inv_sr;
                 if (ch->phi2 > 1048576.0) ch->phi2 -= 1048576.0;
                 float second = voice(wave, ch->phi2, f->buzz, param.freq,
-                                     &ch->last_sample, param.key);
+                                     &ch->last_sample, param.key, inv_sr);
                 out = (out + 0.5f * second) * (5.0f / 6.0f);
             }
         }
@@ -998,6 +1038,14 @@ static void set_music_pattern(int pattern)
 /*  Mixing                                                             */
 /* ------------------------------------------------------------------ */
 
+/* The recording that extcmd("audio_rec") starts: the mixed output, at the
+   rate of the mixer, at most two minutes of it.
+   extcmd("audio_rec")가 시작하는 녹음: 믹서 속도의 섞인 출력, 최대 2분. */
+static float *rec_buf = NULL;
+static size_t rec_len = 0, rec_cap = 0;
+static int    recording = 0;
+#define REC_MAX ((size_t)PICO8_SAMPLE_RATE * 120)
+
 /*
  * fill_buffer(buf, samples) — make the next samples of the sound.
  *
@@ -1092,6 +1140,17 @@ static void fill_buffer(float *buf, int samples)
         if (mix > 1.0f) mix = 1.0f;
         else if (mix < -1.0f) mix = -1.0f;
         buf[i] = mix;
+
+        if (recording && rec_len < REC_MAX) {
+            if (rec_len == rec_cap) {
+                size_t cap = rec_cap ? rec_cap * 2 : 65536;
+                float *grown = (float *)realloc(rec_buf, cap * sizeof(float));
+                if (!grown) { recording = 0; continue; }
+                rec_buf = grown;
+                rec_cap = cap;
+            }
+            rec_buf[rec_len++] = mix;
+        }
     }
 }
 
@@ -1437,6 +1496,85 @@ static void put_le(FILE *f, unsigned value, int bytes)
 }
 
 /*
+ * write_wav_header(f, samples) — the header of a 22050Hz, 16 bit, mono file.
+ *
+ * 22050Hz, 16비트, 모노 파일의 헤더.
+ */
+static void write_wav_header(FILE *f, int samples)
+{
+    fwrite("RIFF", 1, 4, f); put_le(f, 36 + samples * 2, 4);
+    fwrite("WAVEfmt ", 1, 8, f);
+    put_le(f, 16, 4); put_le(f, 1, 2); put_le(f, 1, 2);
+    put_le(f, WAV_RATE, 4); put_le(f, WAV_RATE * 2, 4);
+    put_le(f, 2, 2); put_le(f, 16, 2);
+    fwrite("data", 1, 4, f); put_le(f, samples * 2, 4);
+}
+
+/*
+ * put_sample(f, value) — one 16 bit sample, clipped.
+ *
+ * 잘라 낸 16비트 샘플 하나.
+ */
+static void put_sample(FILE *f, float value)
+{
+    if (value > 32767.0f) value = 32767.0f;
+    if (value < -32768.0f) value = -32768.0f;
+    put_le(f, (unsigned)(int16_t)lrintf(value) & 0xffff, 2);
+}
+
+/*
+ * pico8_audio_record_start() — start recording what the mixer plays.
+ *
+ * Throws away a recording that was not saved.  Without a sound card (the
+ * headless mode) nothing is mixed, so the recording stays empty, just like
+ * PICO-8 run with -x.
+ *
+ * 믹서가 내는 소리를 녹음하기 시작한다. 저장하지 않은 녹음은 버린다. 사운드
+ * 카드가 없으면(헤드리스) 섞이는 소리가 없으니 녹음은 비어 있다. -x로 돌린
+ * PICO-8과 같다.
+ */
+void pico8_audio_record_start(void)
+{
+    lock_audio();
+    rec_len = 0;
+    recording = 1;
+    unlock_audio();
+}
+
+/*
+ * pico8_audio_record_save(path) — stop recording and write the .wav file.
+ *
+ * The file is 22050Hz, 16 bit, mono like PICO-8's: every two samples of the
+ * mixer become one.  The level is the one of the sound effect export.
+ * Returns 0 on success, -1 when nothing was recording or the file cannot be
+ * written.
+ *
+ * 녹음을 멈추고 .wav 파일을 쓴다. PICO-8처럼 22050Hz, 16비트, 모노이며 믹서의
+ * 두 샘플이 하나가 된다. 크기는 효과음 export와 같다. 성공하면 0, 녹음 중이
+ * 아니었거나 파일을 쓸 수 없으면 -1.
+ */
+int pico8_audio_record_save(const char *path)
+{
+    lock_audio();
+    int was = recording;
+    recording = 0;
+    unlock_audio();
+    if (!was) return -1;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) return -1;
+    int samples = (int)(rec_len / 2);
+    write_wav_header(f, samples);
+    /* the mixer adds every channel at half its level (see fill_buffer) */
+    for (int i = 0; i < samples; i++)
+        put_sample(f, (rec_buf[2 * i] + rec_buf[2 * i + 1]) * 0.5f * 2.0f * WAV_GAIN);
+    int ok = !ferror(f);
+    fclose(f);
+    rec_len = 0;
+    return ok ? 0 : -1;
+}
+
+/*
  * pico8_audio_export_sfx_wav(sfx_id, path) — render a sound effect to a file.
  *
  * Plays the sound effect on a private channel, away from the four channels
@@ -1456,12 +1594,7 @@ int pico8_audio_export_sfx_wav(int sfx_id, const char *path)
     FILE *f = fopen(path, "wb");
     if (!f) return -1;
 
-    fwrite("RIFF", 1, 4, f); put_le(f, 36 + samples * 2, 4);
-    fwrite("WAVEfmt ", 1, 8, f);
-    put_le(f, 16, 4); put_le(f, 1, 2); put_le(f, 1, 2);
-    put_le(f, WAV_RATE, 4); put_le(f, WAV_RATE * 2, 4);
-    put_le(f, 2, 2); put_le(f, 16, 2);
-    fwrite("data", 1, 4, f); put_le(f, samples * 2, 4);
+    write_wav_header(f, samples);
 
     struct Channel ch = CHANNEL_IDLE;
     ch.sfx = sfx_id;
@@ -1470,10 +1603,7 @@ int pico8_audio_export_sfx_wav(int sfx_id, const char *path)
 
     for (int i = 0; i < samples; i++) {
         int is_music;
-        float out = channel_sample(&ch, inv_sr, &is_music) * WAV_GAIN;
-        if (out > 32767.0f) out = 32767.0f;
-        if (out < -32768.0f) out = -32768.0f;
-        put_le(f, (unsigned)(int16_t)lrintf(out) & 0xffff, 2);
+        put_sample(f, channel_sample(&ch, inv_sr, &is_music) * WAV_GAIN);
     }
 
     int ok = !ferror(f);

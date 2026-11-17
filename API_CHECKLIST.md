@@ -34,13 +34,16 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
       `46`–`49` (channel sfx), `50`–`53` (channel note), `54`–`57` (music),
       `80`–`85` (UTC), `90`–`95` (local), `100` (breadcrumb label)
 - [~] `extcmd(cmd_str, p1, p2)` (`reset`, `shutdown`, `pause` (falls back to the
-      shell), `folder` and `go_back` are handled; `label`/`screen`/`video`/
-      `rec`/`audio_*`/`set_filename` are host editor features with no equivalent)
+      shell), `folder`, `go_back`, `screen` (384x384 png, pixel-identical to
+      PICO-8), `audio_rec`/`audio_end` (22050Hz wav) and `set_filename` (exact
+      name, overwritten; otherwise `<cart>_N`) are handled, in
+      `$PICO_C_DESKTOP` or ~/Desktop; `label`, `rec` and `video` (gif) are not)
 - [x] `menuitem(index, [label], [callback])` (1..5 with button mask in bits
       0xff00; items are stored and can be listed/invoked from the shell's
       `menu` command, since pico-c has no modal pause menu)
-- [x] `serial(channel, address, length)` (accepted and ignored — there is no
-      GPIO device on desktop, matching PICO-8 without a GPIO server)
+- [x] `serial(channel, address, length)`: 0x805 writes RAM bytes to stdout,
+      0x804 reads stdin into RAM (not from a terminal), both return the count
+      (oracle-checked); other channels (GPIO, dropped files) move 0 bytes
 
 ## Graphics
 - [x] `clip(x, y, w, h, clip_previous)`
@@ -95,8 +98,12 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
       quieter there), detune of the noise and buzz of the noise (left plain),
       the reverb of an instrument (PICO-8 cuts its tail at the end of the
       outer note, pico-c lets it ring)
-- [~] Note timing: PICO-8 applies note changes up to one tick (183 samples at
-      22050Hz) later than pico-c, which shows in slides and fades
+- [x] Note timing: effects are worked out once per tick and held (slide
+      linear in pitch, vibrato a 16-tick triangle in 2-tick steps, arpeggio
+      steps of 4 / 8 ticks); only PICO-8's export start delay (34..215
+      samples, different every run) is not reproduced
+- [x] Noise (waveform 6): spectrum and level per key fitted to PICO-8
+      (`src/noise_table.inc`, `tools/gen_noise.py`)
 
 ## Map
 - [x] `mget`, `mset`
@@ -148,7 +155,7 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] `dget`, `dset` (file-backed)
 
 ## GPIO
-- [~] `serial(channel, address, length)`
+- [x] `serial(channel, address, length)` (see System)
 
 ## Mouse and Keyboard Input
 - [x] Devkit input mode `POKE(0x5f2d, flags)` (0x1 enable, 0x2 mouse→btn, 0x4 pointer lock)
@@ -159,7 +166,9 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 ## Macro/Meta
 - [x] token parity — the 8192-token limit, the 65536-byte source limit and both
       messages match the oracle byte for byte (progress.md §3-4)
-- [ ] performance parity (fixed-point maths speed, profiling)
+- [x] performance: a heavy synthetic frame takes ~2-3 ms (budget 16.7 ms);
+      `pico-c -headless -frames N` benchmarks a cart; `sqrt` and numeric-key
+      lookups were the measurable hot spots and are fixed in the z8lua patch
 - [x] hidden/global API parity — `pairs(_ENV)` now enumerates exactly the same
       176 names as the oracle (`_pausemenu`, `__type`, `cocreate`/`coresume`/
       `costatus`/`yield`, `inext`, `trace`/`mapdraw`/`_set_fps`/… stubs and the
@@ -178,4 +187,5 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] non-command input is evaluated as Lua (`?expr` = `print(expr)`), incl. statement-first semantics
 - [x] `export foo%d.wav` (every SFX to its own file) / `export foo.wav` (SFX 0), also as the Lua function `export()`
 - [~] `edit` opens the cart in `$EDITOR` and reloads it; there is no built-in editor
-- [ ] `splore`, `keyconfig`, `install_demos`/`install_games`, `import`, `export` of html/bin/png, `login`/`logout`/`upload` — recognised, print honest "not available" messages
+- [x] `export foo.png` (the spritesheet, 128x128, pixel-identical to PICO-8) / `import foo.png` (into the spritesheet, nearest palette colour — the mapping is not oracle-checked)
+- [ ] `splore`, `keyconfig`, `install_demos`/`install_games`, `export` of html/bin, `login`/`logout`/`upload` — recognised, print honest "not available" messages

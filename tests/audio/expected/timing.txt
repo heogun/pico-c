@@ -1,0 +1,5 @@
+# Note effect timing readouts, recorded from PICO-8 0.2.7.
+# <sfx> <window> <count> | <notes>  (windows of 4 ticks: PICO-8 starts a little late)
+9 732 16 | 9 12 16 21 9 12 16 21 9 12 16 21 9 12 16 21
+10 732 16 | 9 9 12 12 16 16 21 21 9 9 12 12 16 16 21 21
+12 rms | 0.305 ~0.02

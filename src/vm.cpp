@@ -38,6 +38,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <math.h>
 
@@ -174,6 +175,58 @@ static std::string chunk_line(int line)
     size_t end = g_chunk_text.find('\n', pos);
     if (end == std::string::npos) end = g_chunk_text.size();
     return g_chunk_text.substr(pos, end - pos);
+}
+
+/*
+ * syntax_error_block(line, text) — the block PICO-8 prints for a syntax error.
+ *
+ * Most errors come out as "syntax error line N (tab 0)", the source line
+ * and the message.  Two kinds look different on PICO-8 0.2.7 (measured):
+ *
+ *   - a construct left open.  Lua says "'end' expected (to close 'if' at
+ *     line 2) near <eof>"; PICO-8 says
+ *         syntax error / unclosed if at line 2 (tab 0) / (empty line)
+ *     for a keyword, and for a bracket
+ *         syntax error line 2 (tab 0) / <line 2> / unclosed (
+ *     where the last line is left out when the file ends inside it;
+ *   - an error that names its own line ("no visible label 'x' for <goto>
+ *     at line 2"): "syntax error" and then the message with " (tab 0)".
+ *
+ * PICO-8이 문법 오류에 찍는 블록. 대부분은 "syntax error line N (tab 0)", 소스
+ * 줄, 메시지다. 0.2.7에서 두 종류가 다르게 나온다(실측): 열어 둔 구문은 키워드면
+ * "syntax error / unclosed if at line 2 (tab 0) / 빈 줄", 괄호면 "syntax error
+ * line 2 (tab 0) / 2번 줄 / unclosed (" (파일이 괄호 안에서 끝나면 마지막 줄
+ * 없음). 자기 줄을 말하는 오류("... at line 2")는 "syntax error" 다음에
+ * 메시지와 " (tab 0)".
+ */
+static std::string syntax_error_block(int line, const std::string &text)
+{
+    const char *close = strstr(text.c_str(), " expected (to close '");
+    if (close) {
+        const char *what = close + strlen(" expected (to close '");
+        const char *quote = strchr(what, '\'');
+        const char *at = quote ? strstr(quote, " at line ") : NULL;
+        if (quote && at) {
+            std::string opener(what, quote - what);
+            int open_line = atoi(at + strlen(" at line "));
+            bool at_eof = strstr(at, "near <eof>") != NULL;
+            if (isalpha((unsigned char)opener[0]))
+                return "syntax error\nunclosed " + opener + " at line " +
+                       std::to_string(open_line) + " (tab 0)\n\n";
+            std::string block = "syntax error line " + std::to_string(open_line) +
+                                " (tab 0)\n" + chunk_line(open_line) + "\n";
+            if (!at_eof) block += "unclosed " + opener + "\n";
+            return block;
+        }
+    }
+
+    size_t at = text.rfind(" at line ");
+    if (at != std::string::npos && text.find(" near ") == std::string::npos &&
+        text.find_first_not_of("0123456789", at + 9) == std::string::npos)
+        return "syntax error\n" + text + " (tab 0)\n";
+
+    return "syntax error line " + std::to_string(line) + " (tab 0)\n" +
+           chunk_line(line) + "\n" + text + "\n";
 }
 
 struct ErrorFrame {
@@ -539,10 +592,7 @@ int pico8_vm_load_buffer(const char *buf, size_t len, const char *name)
     if (err) {
         std::string text;
         int line = error_position(lua_tostring(L, -1), text);
-        std::string block;
-        block += "syntax error line " + std::to_string(line) + " (tab 0)\n";
-        block += chunk_line(line) + "\n";
-        block += text + "\n";
+        std::string block = syntax_error_block(line, text);
         fputs(block.c_str(), stdout);
         fflush(stdout);
         g_error_reported = 1;

@@ -86,6 +86,11 @@ OBJ_DIR        := $(BUILD_DIR)/obj
 Z8LUA_OBJ_DIR  := $(BUILD_DIR)/z8lua
 Z8LUA_A        := $(BUILD_DIR)/libz8lua.a
 Z8LUA_STAMP    := $(BUILD_DIR)/.z8lua.stamp
+# z8lua is pinned to a known revision and patched with pico-c's changes
+# (PICO-8 parser fixes, numeric string keys, faster sqrt); see
+# platforms/common/README.md.
+Z8LUA_REV      := 8575dfbc524003c869c0aa05e109819302c576f9
+Z8LUA_PATCH    := $(ROOT)/platforms/common/z8lua.patch
 TARGET         := $(BUILD_DIR)/pico-c$(EXE_SUFFIX)
 ASAN_TARGET    := $(BUILD_DIR)/pico-c-asan$(EXE_SUFFIX)
 TEST_CART      := $(ROOT)/tests/carts/test.p8
@@ -133,7 +138,7 @@ $(TARGET): $(CPP_OBJS) $(Z8LUA_A)
 	@[ -n "$(CODESIGN)" ] && $(CODESIGN) $@ || true
 
 # ------------------------------------------------------------------- z8lua --
-$(Z8LUA_STAMP): | $(BUILD_DIR)
+$(Z8LUA_STAMP): $(Z8LUA_PATCH) | $(BUILD_DIR)
 	@mkdir -p $(Z8LUA_DIR)
 	@if [ ! -d "$(Z8LUA_DIR)/.git" ]; then \
 	  if [ -n "$$(ls -A $(Z8LUA_DIR) 2>/dev/null)" ]; then \
@@ -141,9 +146,20 @@ $(Z8LUA_STAMP): | $(BUILD_DIR)
 	    echo "       remove the directory and run make again" >&2; \
 	    exit 1; \
 	  fi; \
-	  git clone --branch pico8 --depth 1 https://github.com/samhocevar/z8lua.git "$(Z8LUA_DIR)"; \
+	  git clone --branch pico8 https://github.com/samhocevar/z8lua.git "$(Z8LUA_DIR)" && \
+	  git -C "$(Z8LUA_DIR)" checkout -q $(Z8LUA_REV) || exit 1; \
 	else \
 	  echo "z8lua already present in $(Z8LUA_DIR)"; \
+	fi
+	@if git -C "$(Z8LUA_DIR)" apply --reverse --check "$(Z8LUA_PATCH)" 2>/dev/null; then \
+	  echo "z8lua patch already applied"; \
+	elif git -C "$(Z8LUA_DIR)" apply --check "$(Z8LUA_PATCH)" 2>/dev/null; then \
+	  git -C "$(Z8LUA_DIR)" apply "$(Z8LUA_PATCH)" && echo "z8lua patched"; \
+	else \
+	  echo "error: $(Z8LUA_PATCH) does not apply to $(Z8LUA_DIR)" >&2; \
+	  echo "       the checkout has other changes or another revision; reset it with" >&2; \
+	  echo "       git -C $(Z8LUA_DIR) checkout -q $(Z8LUA_REV) -- . && make" >&2; \
+	  exit 1; \
 	fi
 	@touch $@
 
