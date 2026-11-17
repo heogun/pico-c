@@ -104,4 +104,16 @@ int pico8_audio_music_playing(void);        /* stat(57) */
  */
 int pico8_audio_export_sfx_wav(int sfx_id, const char *path);
 
+/*
+ * extcmd("audio_rec") / extcmd("audio_end"): record what the mixer plays and
+ * write it as a .wav file (22050Hz, 16 bit, mono).  The save returns 0 on
+ * success, -1 when nothing was recording or the file cannot be written.
+ *
+ * extcmd("audio_rec") / extcmd("audio_end"): 믹서가 내는 소리를 녹음하고
+ * .wav(22050Hz, 16비트, 모노)로 쓴다. 저장은 성공하면 0, 녹음 중이 아니었거나
+ * 파일을 쓸 수 없으면 -1.
+ */
+void pico8_audio_record_start(void);
+int  pico8_audio_record_save(const char *path);
+
 #endif /* PICO8_AUDIO_H */

@@ -1,0 +1,3 @@
+syntax error line 2 (tab 0)
+a=1
+<eof> expected near 'end'

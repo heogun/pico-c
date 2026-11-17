@@ -1,0 +1,6 @@
+# Noise (waveform 6) readouts, recorded from PICO-8 0.2.7.
+# <sfx> rms <end> | <value> ~<tol>  (the noise is random: PICO-8 itself varies by ~0.02)
+8 rms 11000 | 0.432 ~0.04
+9 rms 11000 | 0.509 ~0.04
+10 rms 11000 | 0.691 ~0.04
+11 rms 11000 | 0.846 ~0.04

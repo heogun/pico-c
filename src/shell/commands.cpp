@@ -28,6 +28,7 @@
 #include "pico8.h"
 #include "util.h"
 #include "shell_internal.h"
+#include "stb_image.h"
 
 /* ------------------------------------------------------------------ */
 /*  Commands                                                          */
@@ -714,18 +715,72 @@ static void cmd_splore(const std::string &, const std::string &)
 }
 
 /*
- * cmd_import_shell(arg, arg2) — import a cart.
+ * sheet_to_pixels(pixels) — the spritesheet as a 128x128 RGB picture.
  *
- * PICO-8 can import a cart from the BBS.  pico-c cannot, so this only
- * says so.
+ * The sprites live at 0x0000..0x1fff, two pixels a byte, the left one in
+ * the low nibble.  The colours are the 16 of the plain palette.
  *
- * PICO-8은 BBS에서 카트를 가져올 수 있다. pico-c는 할 수 없으므로
- * 그것을 말할 뿐이다.
+ * 스프라이트는 0x0000..0x1fff에 바이트당 두 픽셀(왼쪽이 하위 니블)로 있다.
+ * 색은 기본 팔레트의 16색이다.
+ */
+static void sheet_to_pixels(std::vector<uint32_t> &pixels)
+{
+    pixels.assign(128 * 128, 0);
+    for (int y = 0; y < 128; y++)
+        for (int x = 0; x < 128; x++) {
+            uint8_t b = pico8_ram[y * 64 + x / 2];
+            pixels[y * 128 + x] = pico8_palette[(x & 1) ? b >> 4 : b & 15];
+        }
+}
+
+/*
+ * nearest_colour(r, g, b) — the palette colour closest to an RGB colour.
+ *
+ * RGB 색에 가장 가까운 팔레트 색.
+ */
+static int nearest_colour(int r, int g, int b)
+{
+    int best = 0, best_d = 1 << 30;
+    for (int c = 0; c < 16; c++) {
+        int dr = r - (int)((pico8_palette[c] >> 16) & 0xff);
+        int dg = g - (int)((pico8_palette[c] >> 8) & 0xff);
+        int db = b - (int)(pico8_palette[c] & 0xff);
+        int d = dr * dr + dg * dg + db * db;
+        if (d < best_d) { best_d = d; best = c; }
+    }
+    return best;
+}
+
+/*
+ * cmd_import_shell(arg, arg2) — import a file into the cart.
+ *
+ * "import foo.png" reads a picture into the spritesheet: the top left
+ * 128x128 pixels, every pixel turned into the closest of the 16 colours.
+ * Other files (a cart from the BBS, ...) are not supported.
+ *
+ * "import foo.png"는 그림을 스프라이트 시트로 읽는다: 왼쪽 위 128x128 픽셀을,
+ * 픽셀마다 16색 중 가장 가까운 색으로 바꿔서. 다른 파일(BBS의 카트 등)은
+ * 지원하지 않는다.
  */
 static void cmd_import_shell(const std::string &arg, const std::string &)
 {
     if (arg.empty()) {
         shell_print_error("usage: import <filename>");
+        return;
+    }
+    if (util_has_suffix(arg, ".png")) {
+        int w = 0, h = 0, comp = 0;
+        unsigned char *img = stbi_load(arg.c_str(), &w, &h, &comp, 4);
+        if (!img) { shell_print_error("import: cannot read " + arg); return; }
+        for (int y = 0; y < 128 && y < h; y++)
+            for (int x = 0; x < 128 && x < w; x++) {
+                const unsigned char *p = img + ((size_t)y * w + x) * 4;
+                int c = nearest_colour(p[0], p[1], p[2]);
+                uint8_t &b = pico8_ram[y * 64 + x / 2];
+                b = (x & 1) ? (uint8_t)((b & 0x0f) | (c << 4)) : (uint8_t)((b & 0xf0) | c);
+            }
+        stbi_image_free(img);
+        shell_print_info("imported " + arg);
         return;
     }
     shell_print("import: " + arg + " is not supported in pico-c", COL_TEXT);
@@ -735,16 +790,17 @@ static void cmd_import_shell(const std::string &arg, const std::string &)
 /*
  * cmd_export_shell(arg, arg2) — export a cart.
  *
- * Only the sound is supported: "export foo%d.wav" writes every sound effect
- * to its own file (foo0.wav .. foo63.wav), like PICO-8 does, and
- * "export foo.wav" writes sound effect 0 (the one PICO-8's editor has
- * selected after a load).  The other formats (html, bin, png) are not
- * available, and the command says so and points at "save".
+ * "export foo%d.wav" writes every sound effect to its own file (foo0.wav ..
+ * foo63.wav), like PICO-8 does, and "export foo.wav" writes sound effect 0
+ * (the one PICO-8's editor has selected after a load).  "export foo.png"
+ * writes the spritesheet as a 128x128 picture.  The other formats (html,
+ * bin) are not available, and the command says so and points at "save".
  *
- * 소리만 지원한다: "export foo%d.wav"는 PICO-8처럼 효과음마다 파일 하나씩
- * (foo0.wav .. foo63.wav) 쓰고, "export foo.wav"는 효과음 0(로드 직후 PICO-8
- * 편집기가 고르고 있는 것)을 쓴다. 다른 형식(html, bin, png)은 지원하지 않으므로
- * 그렇게 말하고 "save"를 가리킨다.
+ * "export foo%d.wav"는 PICO-8처럼 효과음마다 파일 하나씩(foo0.wav ..
+ * foo63.wav) 쓰고, "export foo.wav"는 효과음 0(로드 직후 PICO-8 편집기가
+ * 고르고 있는 것)을 쓴다. "export foo.png"는 스프라이트 시트를 128x128 그림으로
+ * 쓴다. 다른 형식(html, bin)은 지원하지 않으므로 그렇게 말하고 "save"를
+ * 가리킨다.
  */
 static void cmd_export_shell(const std::string &arg, const std::string &)
 {
@@ -762,6 +818,16 @@ static void cmd_export_shell(const std::string &arg, const std::string &)
                 shell_print_error("export: cannot write " + out);
                 return;
             }
+        }
+        shell_print_info("exported " + arg);
+        return;
+    }
+    if (util_has_suffix(arg, ".png") && !util_has_suffix(arg, ".p8.png")) {
+        std::vector<uint32_t> pixels;
+        sheet_to_pixels(pixels);
+        if (pico8_png_write(arg.c_str(), pixels.data(), 128, 128) != 0) {
+            shell_print_error("export: cannot write " + arg);
+            return;
         }
         shell_print_info("exported " + arg);
         return;

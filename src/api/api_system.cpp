@@ -19,6 +19,8 @@
 #include <string.h>
 #include <time.h>
 
+#include <vector>
+
 #include "api_internal.h"
 
 /*
@@ -40,13 +42,18 @@ static int pico8_time(lua_State *L)
  * extcmd(command) — ask the host to do something.
  *
  * The commands that mean something here are "reset" (restart the cart),
- * "shutdown" (quit the emulator), "pause" (open the shell) and "folder"
- * (open the folder of the cart in the file browser).  The others are
- * features of the PICO-8 editor and have no equivalent here.
+ * "shutdown" (quit the emulator), "pause" (open the shell), "folder"
+ * (open the folder of the cart in the file browser), "go_back", and the
+ * captures: "screen" (a 384x384 screenshot), "audio_rec" / "audio_end" (a
+ * recording of the sound) and "set_filename" (their name, see
+ * pico8_console_capture_path()).  "label", "rec" and "video" are not
+ * supported.
  *
  * 여기서 의미를 갖는 명령은 "reset"(카트 재시작), "shutdown"(에뮬레이터 종료),
- * "pause"(셸 열기), "folder"(카트 폴더를 파일 브라우저로 열기)이다. 나머지는
- * PICO-8 편집기의 기능이라 여기서는 대응하는 것이 없다.
+ * "pause"(셸 열기), "folder"(카트 폴더를 파일 브라우저로 열기), "go_back", 그리고
+ * 캡처: "screen"(384x384 스크린샷), "audio_rec" / "audio_end"(소리 녹음),
+ * "set_filename"(그 이름, pico8_console_capture_path() 참고)이다. "label",
+ * "rec", "video"는 지원하지 않는다.
  */
 static int pico8_extcmd(lua_State *L)
 {
@@ -68,9 +75,22 @@ static int pico8_extcmd(lua_State *L)
             pico8_console_queue_load(crumb, NULL, NULL);
             pico8_vm_halted = 1;
         }
+    } else if (strcmp(cmd, "set_filename") == 0) {
+        pico8_console_set_capture_name(luaL_optstring(L, 2, ""));
+    } else if (strcmp(cmd, "screen") == 0) {
+        /* A screenshot at PICO-8's default screenshot_scale of 3. */
+        const int scale = 3;
+        const int w = PICO8_SCREEN_W * scale, h = PICO8_SCREEN_H * scale;
+        std::vector<uint32_t> pixels((size_t)w * h);
+        pico8_render_screen(pixels.data(), w * 4, scale);
+        pico8_png_write(pico8_console_capture_path(".png"), pixels.data(), w, h);
+    } else if (strcmp(cmd, "audio_rec") == 0) {
+        pico8_audio_record_start();
+    } else if (strcmp(cmd, "audio_end") == 0) {
+        pico8_audio_record_save(pico8_console_capture_path(".wav"));
     }
-    /* "label", "screen", "video", "rec", "audio_rec", "audio_end" and
-       "set_filename" are host/editor features that have no equivalent here. */
+    /* "label" (the label of the cart), "rec" and "video" (gif recording)
+       are not supported. */
     return 0;
 }
 

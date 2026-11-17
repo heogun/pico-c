@@ -527,14 +527,21 @@ static void main_loop(void)
  *   pico-c <cart.p8>              run a cart
  *   pico-c -p <args> <cart.p8>    run a cart with a parameter string
  *   pico-c -headless <cart.p8>    run a cart without a window
+ *   pico-c -headless -frames N <cart.p8>
+ *                                 ... for N frames, then print how long the
+ *                                 cart took per frame (to stderr)
  *
  * The headless mode is what the test suite uses: it runs the cart for a
  * limited number of frames and writes what the cart prints to the standard
- * output.
+ * output.  With -frames it is a benchmark: the frames run back to back, and
+ * the time spent in the cart's update and draw is reported.
  *
  *   pico-c <cart.p8>              카트 실행
  *   pico-c -p <args> <cart.p8>    파라미터 문자열과 함께 카트 실행
  *   pico-c -headless <cart.p8>    창 없이 카트 실행
+ *   pico-c -headless -frames N <cart.p8>
+ *                                 ... N 프레임 동안, 끝나면 프레임당 걸린 시간을
+ *                                 표준 오류로 찍는다(벤치마크)
  *
  * 헤드리스 모드가 테스트 스위트가 쓰는 모드다. 정해진 프레임 수만큼 카트를
  * 돌리고, 카트가 출력한 것을 표준 출력으로 쓴다.
@@ -544,12 +551,15 @@ int main(int argc, char *argv[])
     const char *cart_path = NULL;
     const char *cmdline_args = NULL;
     int headless = 0;
+    int bench_frames = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
             cmdline_args = argv[++i];
         } else if (strcmp(argv[i], "-headless") == 0) {
             headless = 1;
+        } else if (strcmp(argv[i], "-frames") == 0 && i + 1 < argc) {
+            bench_frames = atoi(argv[++i]);
         } else if (cart_path == NULL && argv[i][0] != '-') {
             cart_path = argv[i];
         }
@@ -591,8 +601,10 @@ int main(int argc, char *argv[])
             fflush(stdout);
         }
 
-        int frame_limit = 7200;
+        int frame_limit = bench_frames > 0 ? bench_frames : 7200;
         uint32_t start = SDL_GetTicks();
+        uint64_t busy = 0, worst = 0;
+        int ticks = 0;
         while (frame_limit > 0 &&
                (!pico8_vm_halted || pico8_console_request_load)) {
             if (pico8_console_request_load) {
@@ -616,14 +628,26 @@ int main(int argc, char *argv[])
                 continue;
             }
             if (has_update60 || (pico8_frame_count % 2) == 0) {
+                uint64_t t0 = SDL_GetPerformanceCounter();
                 pico8_update_input(has_update60);
                 pico8_vm_call_update();
                 if (has_draw) pico8_vm_call_draw();
+                uint64_t dt = SDL_GetPerformanceCounter() - t0;
+                busy += dt;
+                if (dt > worst) worst = dt;
+                ticks++;
             }
             pico8_frame_count++;
             frame_limit--;
-            if (frame_limit % 60 == 0 && SDL_GetTicks() - start > 120000)
+            if (bench_frames == 0 && frame_limit % 60 == 0 &&
+                SDL_GetTicks() - start > 120000)
                 break;
+        }
+
+        if (bench_frames > 0 && ticks > 0) {
+            double f = 1000.0 / (double)SDL_GetPerformanceFrequency();
+            fprintf(stderr, "bench: %d updates, %.3f ms avg, %.3f ms worst (%s)\n",
+                    ticks, busy * f / ticks, worst * f, has_update60 ? "60fps" : "30fps");
         }
 
         pico8_vm_destroy();

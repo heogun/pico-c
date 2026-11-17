@@ -15,6 +15,7 @@ tests/
 | File | What it does |
 |------|--------------|
 | `cmp_*.p8` | the regression suite: every cart prints its result with `printh()`, so the transcript can be compared with the one of the real PICO-8 |
+| `cmp_syntax_*.p8` | one syntax error each (a block or a bracket left open, a missing goto label, a stray `end`): the error block PICO-8 prints |
 | `cmp_stat_time.p8` | the clock: the values cannot be compared literally, so the cart only prints properties that hold at every point in time |
 | `test.p8` | the small demo cart used to try the emulator out |
 | `cstore_base.p8` | the cart `cmp_cstore.p8` writes its data area into |
@@ -55,6 +56,8 @@ own export of the same cart.
 |------|--------------|
 | `audio/carts/inst.p8` | custom instruments (waveforms 8–15): the retrigger rules, the instrument clock, effects on top, nesting, loops |
 | `audio/carts/filters.p8` | the SFX filters: buzz on every waveform, dampen, detune, reverb, noiz, filters of an instrument |
+| `audio/carts/noise.p8` | the loudness of the plain noise at four keys (random, so compared within a tolerance) |
+| `audio/carts/timing.p8` | effects worked out once per tick: the arpeggio steps, the silent first tick of a fade in |
 | `audio/expected/<name>.txt` | one check per line, recorded with `platforms/macos/oracle_audio.sh --record` (see below) |
 
 A line is either `<sfx> <window> <count> | <notes>` (the notes, compared

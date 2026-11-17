@@ -79,6 +79,15 @@ int pico8_cart_save_png(const char *path);
 int pico8_cart_save_rom_png(const char *path);
 
 /*
+ * Write a plain RGB picture as a .png file (the screenshots use it too).
+ * `pixels` holds 0x00RRGGBB, `width` per row.  0 on success, -1 on failure.
+ *
+ * 평범한 RGB 그림을 .png 파일로 쓴다(스크린샷도 쓴다). `pixels`는 한 줄에
+ * `width`개씩 0x00RRGGBB를 담는다. 성공하면 0, 실패하면 -1.
+ */
+int pico8_png_write(const char *path, const uint32_t *pixels, int width, int height);
+
+/*
  * Read only a cartridge's data area (0x4300 bytes) without touching RAM.
  *
  * RAM을 건드리지 않고 카트의 데이터 영역(0x4300바이트)만 읽는다.

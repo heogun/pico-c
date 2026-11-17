@@ -244,6 +244,51 @@ int cart_write_p8png(const char *path, const uint8_t *rom,
 }
 
 /*
+ * pico8_png_write(path, pixels, width, height) — write an RGB picture.
+ *
+ * Colour type 2 (RGB, 8 bits a channel), every row with filter 0, the
+ * data in stored deflate blocks, like the cart writer above.
+ *
+ * 색 형식 2(RGB, 채널당 8비트), 모든 줄은 필터 0, 데이터는 위의 카트 쓰기처럼
+ * stored deflate 블록으로.
+ */
+int pico8_png_write(const char *path, const uint32_t *pixels, int width, int height)
+{
+    std::string raw;
+    raw.reserve((size_t)height * (1 + (size_t)width * 3));
+    for (int y = 0; y < height; y++) {
+        raw += (char)0;                                  /* filter: none */
+        for (int x = 0; x < width; x++) {
+            uint32_t c = pixels[(size_t)y * width + x];
+            raw += (char)((c >> 16) & 0xff);
+            raw += (char)((c >> 8) & 0xff);
+            raw += (char)(c & 0xff);
+        }
+    }
+
+    std::string out = "\x89PNG\r\n\x1a\n";
+    std::string ihdr;
+    png_be32(ihdr, (uint32_t)width);
+    png_be32(ihdr, (uint32_t)height);
+    ihdr += (char)8;   /* bit depth   */
+    ihdr += (char)2;   /* colour type */
+    ihdr += (char)0;   /* compression */
+    ihdr += (char)0;   /* filter      */
+    ihdr += (char)0;   /* interlace   */
+    png_chunk(out, "IHDR", ihdr);
+    std::string z;
+    zlib_stored(z, raw);
+    png_chunk(out, "IDAT", z);
+    png_chunk(out, "IEND", std::string());
+
+    FILE *f = fopen(path, "wb");
+    if (!f) return -1;
+    size_t written = fwrite(out.data(), 1, out.size(), f);
+    fclose(f);
+    return (written == out.size()) ? 0 : -1;
+}
+
+/*
  * pico8_cart_save_png(path) — save the running cart as a .p8.png file.
  *
  * The data that is written is the RAM of the running cart.

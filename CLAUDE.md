@@ -19,6 +19,7 @@ platforms/macos/oracle.sh                # 실제 PICO-8과 직접 비교
 platforms/macos/oracle.sh --record       # tests/expected/ 갱신 (오라클 출력으로)
 platforms/macos/oracle_audio.sh          # 오디오 스위트(tests/audio)를 PICO-8 .wav export와 비교 (--record로 갱신)
 make asan                                # AddressSanitizer 빌드
+./build/macos/pico-c -headless -frames 1800 cart.p8   # 벤치마크(프레임당 평균/최악 ms)
 ```
 
 - 첫 빌드 시 `make`가 z8lua를 `platforms/common/deps/z8lua`로 git clone (네트워크 필요).
@@ -53,6 +54,8 @@ make asan                                # AddressSanitizer 빌드
 | `src/vm.cpp` | Lua VM, 콜백 호출, 에러 블록 출력, `pico8_apply_parity()`(전역 API 패리티) |
 | `src/audio.cpp` | 신디사이저 + 뮤직 시퀀서 + 커스텀 악기(`instrument_note`/`instrument_sample`) + SFX 필터(`channel_sample`) + `.wav` export |
 | `src/buzz_table.inc` | buzz 파형 표 (생성기 `tools/gen_buzz.py`, 입력은 PICO-8 .wav export) |
+| `src/noise_table.inc` | 키별 노이즈 필터 `{k, m, g}` (생성기 `tools/gen_noise.py`, numpy/scipy 필요) |
+| `platforms/common/z8lua.patch` | z8lua에 대한 pico-c의 수정(파서, 숫자 문자열 키, sqrt, 오류 줄 번호) |
 | `src/gfx.cpp` `src/input.cpp` `src/memory.cpp` | 화면/입력/RAM의 호스트 측 |
 | `src/charset.cpp` + `charset_table.inc` | charset 바이트 ↔ UTF-8 (생성기 `tools/gen_charset.py`) |
 | `src/font_table.inc` | 256글리프 비트맵 (생성기 `tools/gen_font.py`, 입력 `tools/font_dump.txt`) |
@@ -79,6 +82,10 @@ Makefile은 `src/*.cpp`와 `src/*/*.cpp`를 와일드카드로 잡으므로 **�
 
 ## 건드리지 말 것
 
-- `src/stb_image.h`(서드파티), `*.inc`(생성물 — 생성기를 고쳐서 다시 만들 것).
+- `src/stb_image.h`(서드파티), `*.inc`(생성물 — 생성기를 고쳐서 다시 만들 것:
+  `gen_font.py`, `gen_charset.py`, `gen_buzz.py`, `gen_noise.py`).
+- `platforms/common/deps/z8lua`를 직접 고치면 **반드시** `git -C platforms/common/deps/z8lua diff >
+  platforms/common/z8lua.patch`로 패치를 갱신할 것. Makefile이 z8lua를 리비전 `8575dfbc`에 고정하고 이
+  패치를 적용한다 — 패치에 없는 수정은 다른 체크아웃에서 사라진다.
 - `test_carts/`(저작권 카트), `picotestdriver/`(별도 저장소) — gitignore 대상, 커밋 금지.
 - progress.md §4 "이미 잘 동작하는 것들"은 오라클과 일치가 검증된 부분이니 재구현하지 말 것.

@@ -223,3 +223,53 @@ int pico8_console_load(const char *path)
     }
     return 0;
 }
+
+/* ------------------------------------------------------------------ *
+ *  Captures (screenshots and audio recordings)
+ * ------------------------------------------------------------------ */
+
+static std::string g_capture_name;   /* set by extcmd("set_filename") */
+static std::string g_capture_path;   /* the last path handed out      */
+
+/*
+ * pico8_console_set_capture_name(name) — the name of the next captures.
+ *
+ * An empty name goes back to the numbered names of the cart.
+ *
+ * 다음 캡처들의 이름. 빈 이름이면 카트 이름에 번호를 붙이는 방식으로 돌아간다.
+ */
+void pico8_console_set_capture_name(const char *name)
+{
+    g_capture_name = name ? name : "";
+}
+
+/*
+ * pico8_console_capture_path(ext) — the file the next capture goes to.
+ *
+ * See pico8_console.h.  `ext` is ".png" or ".wav".
+ *
+ * pico8_console.h 참고. `ext`는 ".png" 또는 ".wav"다.
+ */
+const char *pico8_console_capture_path(const char *ext)
+{
+    const char *env  = getenv("PICO_C_DESKTOP");
+    const char *home = getenv("HOME");
+    std::string dir = (env && env[0]) ? std::string(env)
+                    : std::string(home ? home : ".") + "/Desktop";
+
+    if (!g_capture_name.empty()) {
+        g_capture_path = dir + "/" + g_capture_name + ext;
+        return g_capture_path.c_str();
+    }
+
+    std::string base = g_cart_path.empty() ? "pico8" : util_path_base(g_cart_path);
+    if (util_has_suffix(base, ".png")) base.resize(base.size() - 4);
+    if (util_has_suffix(base, ".p8"))  base.resize(base.size() - 3);
+    for (int n = 0; ; n++) {
+        g_capture_path = dir + "/" + base + "_" + std::to_string(n) + ext;
+        FILE *f = fopen(g_capture_path.c_str(), "rb");
+        if (!f) break;
+        fclose(f);
+    }
+    return g_capture_path.c_str();
+}

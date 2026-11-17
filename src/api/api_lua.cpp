@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "api_internal.h"
 
@@ -194,26 +195,52 @@ static int pico8_deli(lua_State *L)
 }
 
 /*
- * serial() — a new serial number for the cart.
+ * serial(channel, address, length) — move bytes between the RAM and a port.
  *
- * Every call gives a number that has not been used before, so that a cart
- * can name its save files.
+ * Channel 0x805 writes `length` bytes of the RAM from `address` to the
+ * standard output, as they are; channel 0x804 reads up to `length` bytes of
+ * the standard input into the RAM.  Both return how many bytes they moved
+ * (measured on PICO-8 0.2.7: 11 for an 11 byte write, 0 for a read at the
+ * end of the input).  The other channels (GPIO, dropped files, ...) have
+ * nothing behind them here and move 0 bytes.
  *
- * 호출할 때마다 전에 쓰지 않은 번호를 주므로, 카트가 저장 파일 이름을
- * 지을 때 쓸 수 있다.
+ * 0x805 채널은 RAM의 `address`부터 `length` 바이트를 그대로 표준 출력에 쓰고,
+ * 0x804 채널은 표준 입력에서 최대 `length` 바이트를 RAM으로 읽는다. 둘 다 옮긴
+ * 바이트 수를 돌려준다(PICO-8 0.2.7 실측: 11바이트 쓰기는 11, 입력 끝에서 읽기는
+ * 0). 다른 채널(GPIO, 끌어다 놓은 파일 등)은 여기에 대응하는 것이 없어 0바이트를
+ * 옮긴다.
  */
 static int pico8_serial(lua_State *L)
 {
-    (void)L;
-    return 0;
+    int channel = (int)luaL_optinteger(L, 1, 0);
+    int address = (int)luaL_optinteger(L, 2, 0);
+    int length  = (int)luaL_optinteger(L, 3, 0);
+    int moved = 0;
+    if (address < 0) address = 0;
+    if (length < 0) length = 0;
+    if (address + length > PICO8_RAM_SIZE) length = PICO8_RAM_SIZE - address;
+
+    if (channel == 0x805 && length > 0) {
+        fflush(stdout);
+        moved = (int)fwrite(pico8_ram + address, 1, (size_t)length, stdout);
+        fflush(stdout);
+    } else if (channel == 0x804 && length > 0 && !isatty(fileno(stdin))) {
+        /* A terminal is left alone: reading it would stop the emulator
+           until someone types.  터미널은 건드리지 않는다: 읽으면 누군가
+           입력할 때까지 에뮬레이터가 멈춘다. */
+        moved = (int)fread(pico8_ram + address, 1, (size_t)length, stdin);
+    }
+    lua_pushinteger(L, moved);
+    return 1;
 }
 
 /*
- * add(table) — add a table to the list of carts of the shell.
+ * add(table, value) — append a value to a table.
  *
- * The shell keeps the carts of the "cartridge tab" in one table.
+ * Puts the value after the last element of the sequence.  A nil table is
+ * ignored, as on PICO-8.
  *
- * 셸은 "카트리지 탭"의 카트들을 하나의 테이블에 모아 둔다.
+ * 값을 시퀀스의 마지막 원소 뒤에 넣는다. PICO-8처럼 nil 테이블은 무시한다.
  */
 static int pico8_add(lua_State *L)
 {

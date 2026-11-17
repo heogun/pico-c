@@ -94,6 +94,16 @@ platforms/macos/oracle_audio.sh            # compare PICO-8 with tests/audio/exp
 platforms/macos/oracle_audio.sh --record   # refresh tests/audio/expected/
 ```
 
+To measure how fast a cart runs, give the headless mode a number of frames;
+it prints the average and the worst time of an update + draw:
+
+```sh
+./build/macos/pico-c -headless -frames 1800 mycart.p8
+```
+
+Screenshots (`extcmd("screen")`) and audio recordings (`extcmd("audio_rec")`
+/ `extcmd("audio_end")`) are saved in `$PICO_C_DESKTOP`, or `~/Desktop`.
+
 ## Source layout
 
 The sources are split so that a change stays in one place.
@@ -167,6 +177,7 @@ Syntax and runtime errors are shown in red.
 | `backup` | Copy the loaded cart's source into `backup/` |
 | `info` | Cart stats (chars/lines) |
 | `export foo%d.wav` | Write every sound effect to its own .wav file (`export foo.wav` writes sfx 0) |
+| `export foo.png` / `import foo.png` | Write / read the spritesheet as a 128×128 picture |
 | `edit` | Open the cart in `$EDITOR` (or `vi`), then reload it |
 | `menu [n]` | List the pause menu items, or run item `n` |
 | `config [key] [value]` | List / set session settings |
@@ -178,7 +189,7 @@ Syntax and runtime errors are shown in red.
 
 There is no built-in code, sprite, map or sound editor: `edit` hands the
 source to an external text editor.  Recognised PICO-8 commands that are not
-implemented (`export` of anything but .wav, `import`, `splore`, `keyconfig`, `install_demos`,
+implemented (`export` to html or bin, `import` of anything but .png, `splore`, `keyconfig`, `install_demos`,
 `install_games`, `login`, `logout`, `upload`) print a "not available"
 message that points to the local alternative where there is one.
 

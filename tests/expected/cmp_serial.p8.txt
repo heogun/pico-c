@@ -1,0 +1,6 @@
+before
+HIJKLMNOPQ
+ret 11
+ret 0
+ret 0
+after

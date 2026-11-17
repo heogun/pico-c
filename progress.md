@@ -371,16 +371,17 @@ PICO-8은 카트의 `__lua__` 소스가 **65536바이트를 넘거나 토큰이 
       "Console" 절에 `edit`/`menu`/`man` 추가 및 미구현 명령 목록 정정
 - [x] **커스텀 악기 (파형 8–15)** — 완료 (2026-11-17, §7)
 - [x] **SFX 필터** (byte 64: noiz/buzz/detune/reverb/dampen) — 완료 (2026-11-17, §8)
-- [ ] **음 타이밍 오프셋**: PICO-8 export는 음 변화가 최대 1틱(183샘플) 늦게 반영되고 시작
-      지연(34~215샘플)이 실행마다 다르다. slide/fade의 곡선이 그만큼 어긋남 (§7)
-- [ ] **성능**: 픽스포인트 연산 최적화, 병목 프로파일 (`make asan` 외에 프로파일 빌드 없음)
+- [x] **일반 노이즈 (파형 6)** — 완료 (2026-11-17, §9-1)
+- [x] **음 타이밍 / 효과 계단** — 완료 (2026-11-17, §9-2). PICO-8 export의 시작 지연(실행마다 다름)만 미재현
+- [x] **성능 + z8lua 패치 관리** — 완료 (2026-11-17, §9-3)
 - [ ] 5단계 마무리 (셸 명령):
   - [x] `edit` — `$EDITOR`(없으면 `vi`)로 카트 소스를 열고 종료 후 다시 로드 (커밋 `2dab3fd`).
         PICO-8식 내장 코드/스프라이트/맵/SFX 에디터는 없음 (큰 작업, 범위 결정 필요)
-  - [~] `import` / `export` — 셸 명령은 안내 메시지 수준, 실제 PNG/WAV/HTML 내보내기 없음
+  - [x] `export foo%d.wav` / `export foo.png`, `import foo.png` (§7, §9-4). html/bin은 없음
   - [~] `keyconfig` — 안내 메시지만. 버튼 리맵 저장 미구현
   - [~] `splore` — 온라인 브라우저는 범위 밖, 로컬 `load` 안내만
-- [ ] **문법 에러 문구 패리티**: 형식은 같지만 z8lua 파서 메시지/줄 번호가 오라클과 다름 (§3-2)
+- [x] **문법 에러 문구 패리티** — 완료 (2026-11-17, §9-4)
+- [x] **extcmd 캡처, serial** — 완료 (2026-11-17, §9-4). `label`, gif(`rec`/`video`)는 미구현
 - [ ] (방해 요소) `/Applications/PICO-8.app` 자체가 멈춤 — /tmp/p8app 사본 사용 유지
 
 ---
@@ -571,3 +572,74 @@ bit0 편집 모드(소리 무관), bit1 noiz, bit2 buzz, detune = (b/8)%3, rever
 - 일반 노이즈(필터 없는 파형 6)의 스펙트럼이 원래부터 오라클과 다르다(저역이 과다, 키 48에서 고역 부족).
 - noiz의 경사 구간, 노이즈의 detune/buzz, 악기 reverb 꼬리, 키 24 미만 buzz 톱니파.
 - 음 타이밍 오프셋(§7)은 그대로.
+
+---
+
+## 9. 로드맵 일괄 진행 (2026-11-17, 브랜치 `feat/roadmap-batch`)
+
+### 9-1. 일반 노이즈 (파형 6)
+
+- PICO-8 노이즈는 키가 높을수록 밝고 크다(RMS 0.40 → 0.87, 키 0 → 63). 샘플은 무작위라 일대일 비교는
+  불가하고 스펙트럼을 맞춘다. 원시 샘플을 보면 2샘플씩 같은 값(내부 ~11025Hz), 105 단위 양자화,
+  ±0.62 부근 클램프와 간헐적 스파이크가 있다 — 이 메커니즘 자체는 재현하지 않았다.
+- 모델: 키마다 `out = g·(lowpass(r; k) + m·r)` (r 균일 백색 잡음, 22050Hz). 64키 전부 오라클에서
+  뽑아 맞춤(로그 스펙트럼 오차 ~0.25 = 측정 잡음 수준), 크기는 측정 RMS로 보정.
+  `tools/gen_noise.py`(numpy/scipy 필요) → `src/noise_table.inc`. 다른 출력 속도에서는 필터를 늘이고
+  √(22050/sr)로 보정.
+- 결과: 키별 RMS가 PICO-8의 실행 간 편차(±0.02) 수준 안. 회귀 `tests/audio/carts/noise.p8`(rms, 허용 0.04).
+
+### 9-2. 음 타이밍 = 틱 단위 계단
+
+"1틱 늦음"의 정체는 지연이 아니라 **효과를 틱(183샘플)마다 한 번 계산해 유지**하는 것이었다.
+
+- slide: **주파수가 아니라 피치(키)에 대해 선형**, 틱마다 계단 (261→288→311→343… 실측이 2^(t) 계열과 일치)
+- vibrato: 음 높이에서 시작해 위로 가는 ±1/4 반음 삼각파, **16틱 한 주기, 2틱마다 한 계단**
+  (기존 구현은 최고점에서 시작하는 매끄러운 곡선)
+- arp: fast 4틱 / slow 8틱마다 한 계단(speed ≤ 8이면 절반) — 기존 `7.5 Hz` 근사 대신 틱 정수로
+- drop, fade in/out: 음의 틱에 대해 선형 → fade in의 첫 틱은 무음 (오라클에서 보이던 현상)
+- 구현: `note_effect()`가 `tick = floor(offset·speed)` 기준으로 계산. 커스텀 악기의 바깥/안쪽 효과도 같이 적용됨.
+- 남은 차이: PICO-8 export의 시작 지연(34~215샘플, 실행마다 다름)은 재현 불가 → 짧은 창의 slide 판독이
+  흔들려서 회귀(`tests/audio/carts/timing.p8`)는 arp(4틱 창)와 fade in만 검사.
+
+### 9-3. 성능 + z8lua 패치
+
+- 벤치: `pico-c -headless -frames N <cart>` → 프레임당 평균/최악 ms를 stderr로. 무거운 합성 프레임
+  (스프라이트 300, circfill 150, pset 3000, tline 64줄, sin/cos/sqrt 4000회, 테이블 1000개)이 ~2-3ms
+  (60fps 예산 16.7ms). 로컬 test_carts는 타이틀 화면이라 1ms 안팎.
+- `sample` 프로파일 핫스팟 두 개를 z8lua에서 고침:
+  - `sqrt`: 24회 abacus 루프 → FPU sqrt + 보정. 5240만 값에서 **비트 단위 동일** 확인. 샘플 486 → 76.
+  - 숫자처럼 생긴 문자열 키 변환(`luaH_newkey`/`luaH_get`)이 **모든** 새 문자열 키마다 `strtod`를
+    부르고 있었음 → 첫 글자로 숫자일 수 없는 키를 걸러냄. 프로파일에서 사라짐.
+- **발견**: 로컬 z8lua 체크아웃에 커밋되지 않은 수정(파서 수정, 숫자 문자열 키)이 있었고 저장소에는
+  없었다 → 새로 클론하면 빠지는 상태였다. 이제 `platforms/common/z8lua.patch`로 관리하고 Makefile이
+  z8lua를 리비전 `8575dfbc`에 고정한 뒤 패치를 적용한다(이미 적용돼 있으면 건너뜀, 다른 변경이 있으면
+  오류). 새 클론에 패치가 적용되는 것까지 확인.
+
+### 9-4. 작은 항목
+
+- **문법 에러 블록** (24케이스 오라클 대조, 전부 일치):
+  - 파서 오류 줄 = **마지막으로 읽은 토큰의 줄**(`luaX_syntaxerror`에서 `lastline`, z8lua 패치) —
+    줄 맨 앞의 stray `end`는 앞 줄의 오류
+  - 닫히지 않은 키워드: `syntax error` / `unclosed if at line N (tab 0)` / 빈 줄
+  - 닫히지 않은 괄호: `syntax error line N (tab 0)` / N번 줄 / `unclosed (` (파일 끝이면 마지막 줄 없음)
+  - 자기 줄을 말하는 오류(goto 라벨): `syntax error` / 메시지 + ` (tab 0)`
+  - 회귀: `cmp_syntax_block/paren/goto/line.p8`
+- **extcmd 캡처**: `screen`(384x384, PICO-8과 픽셀 동일), `audio_rec`/`audio_end`(22050Hz wav, 헤드리스에선
+  빈 파일 — PICO-8 -x와 같음), `set_filename`(정확한 이름, 덮어씀; 없으면 `<카트>_N` 순번). 위치는
+  `$PICO_C_DESKTOP` 또는 ~/Desktop. `label`, gif는 미구현.
+- **serial**: 0x805 = RAM → stdout(그대로), 0x804 = stdin → RAM(터미널이면 읽지 않음), 옮긴 바이트 수 반환.
+  회귀 `cmp_serial.p8`.
+- **import/export png**: `export foo.png` = 스프라이트 시트 128x128 (PICO-8과 픽셀 동일), `import foo.png` =
+  가장 가까운 팔레트 색으로 시트에 읽기(매핑은 오라클 미검증 — 실행 중 카트의 `import()`는 PICO-8에서
+  RAM을 바꾸지 않아 비교 불가).
+- 덤: `serial`/`add`의 잘못된 doc 주석 수정, API_CHECKLIST의 `serial`/`menuitem` 중복 정리.
+
+### 9-5. 결과
+
+`test.sh` **99 passed**(트랜스크립트 50 + 오디오 49), `oracle.sh` 48 MATCH + 2 KNOWN, `oracle_audio.sh` 전부 일치.
+
+### 9-6. 남은 것
+
+- 셸: `keyconfig`(UI 필요), `splore`/BBS(온라인), html/bin export, `extcmd("label")`(라벨 보관이 필요), gif 녹화.
+- 노이즈 메커니즘(11025Hz 쌍, 양자화, 클램프) 자체의 재현, PICO-8 export 시작 지연.
+- `api_gfx.cpp:1336`, `api_memory.cpp`, `vm.cpp`의 기존 컴파일 경고.

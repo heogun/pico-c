@@ -1,0 +1,3 @@
+syntax error line 3 (tab 0)
+x=(1
+unclosed (

@@ -1,0 +1,2 @@
+syntax error
+no visible label 'nowhere' for <goto> at line 3 (tab 0)

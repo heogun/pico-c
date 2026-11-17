@@ -1,0 +1,219 @@
+diff --git a/llex.c b/llex.c
+index 3bb71703..2d107fb3 100644
+--- a/llex.c
++++ b/llex.c
+@@ -120,6 +120,10 @@ static l_noret lexerror (LexState *ls, const char *msg, int token) {
+ 
+ 
+ l_noret luaX_syntaxerror (LexState *ls, const char *msg) {
++  /* pico-c: PICO-8 reports a parser error on the line of the last token it
++     read, not on the line of the token it could not use (a stray 'end' at
++     the start of a line is an error of the line before). */
++  ls->linenumber = ls->lastline;
+   lexerror(ls, msg, ls->t.token);
+ }
+ 
+@@ -131,14 +135,20 @@ l_noret luaX_syntaxerror (LexState *ls, const char *msg) {
+ */
+ TString *luaX_newstring (LexState *ls, const char *str, size_t l) {
+   lua_State *L = ls->L;
+-  TValue *o;  /* entry for `str' */
++  const TValue *o;  /* entry for `str' */
+   TString *ts = luaS_newlstr(L, str, l);  /* create new string */
+   setsvalue2s(L, L->top++, ts);  /* temporarily anchor it in stack */
+-  o = luaH_set(L, ls->fs->h, L->top - 1);
++  /* Look the string up in the string part only. The generic luaH_set
++     would coerce keys such as "1" to the integer key 1 and could return
++     an array cell whose stored key is not a string, which must never be
++     fed to `keyfromval'. */
++  o = luaH_getstr(ls->fs->h, ts);
+   if (ttisnil(o)) {  /* not in use yet? (see 'addK') */
++    TValue key;
++    setsvalue(L, &key, ts);
+     /* boolean value does not need GC barrier;
+        table has no metatable, so it does not need to invalidate cache */
+-    setbvalue(o, 1);  /* t[string] = true */
++    setbvalue(luaH_newkey(L, ls->fs->h, &key), 1);  /* t[string] = true */
+     luaC_checkGC(L);
+   }
+   else {  /* string already present */
+diff --git a/lparser.c b/lparser.c
+index b119947c..53534960 100644
+--- a/lparser.c
++++ b/lparser.c
+@@ -1291,6 +1291,7 @@ static void whilestat (LexState *ls, int line) {
+   enterblock(fs, &bl, 1);
+   int short_while = ls->t.token != TK_DO && ls->t.token != TK_EOS
+                  && ls->braces == 0 && line == ls->linenumber;
++  int emiteol_was = ls->emiteol;
+   if (short_while)
+     ls->emiteol = 1;
+   else
+@@ -1299,11 +1300,13 @@ static void whilestat (LexState *ls, int line) {
+   luaK_jumpto(fs, whileinit);
+   if (!short_while)
+     check_match(ls, TK_END, TK_WHILE, line);
+-  else if (ls->t.token == TK_EOL || ls->t.token == TK_EOS)
+-    luaX_next(ls);  /* eat EOL or EOS */
+-  else if (block_follow(ls, 1))
+-    ls->emiteol = 0;  /* close the short WHILE */
+-  else
++  else if ((ls->t.token == TK_EOL || ls->t.token == TK_EOS) && !emiteol_was)
++    luaX_next(ls);  /* eat EOL or EOS (only if outermost short-while) */
++  else if (block_follow(ls, 1)) {
++    if (!emiteol_was)
++      ls->emiteol = 0;  /* enclosing block consumed 'end'/'until'; reset */
++    /* else leave emiteol for outer short construct */
++  } else
+     check_match(ls, TK_EOL, TK_WHILE, line);  /* we expected EOL */
+   leaveblock(fs);
+   luaK_patchtohere(fs, condexit);  /* false conditions finish the loop */
+@@ -1443,12 +1446,15 @@ static int test_then_block (LexState *ls, int *escapelist) {
+   luaX_next(ls);  /* skip IF or ELSEIF */
+   luaX_trackbraces(ls);  /* track braces for short IF */
+   expr(ls, &v);  /* read condition */
+-  short_if &= ls->t.token != TK_THEN && ls->t.token != TK_EOS
++  short_if &= ls->t.token != TK_THEN && ls->t.token != TK_DO
++           && ls->t.token != TK_EOS
+            && ls->braces == 0 && line == ls->linenumber;
+   if (short_if)
+     ls->emiteol = 1;
+-  else
+-    checknext(ls, TK_THEN);
++  else {
++    int has_do = testnext(ls, TK_DO);
++    if (!has_do) checknext(ls, TK_THEN);
++  }
+   if (ls->t.token == TK_GOTO || ls->t.token == TK_BREAK) {
+     luaK_goiffalse(ls->fs, &v);  /* will jump to label if condition is true */
+     enterblock(fs, &bl, 0);  /* must enter block before 'goto' */
+@@ -1480,6 +1486,7 @@ static void ifstat (LexState *ls, int line) {
+   /* ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END */
+   FuncState *fs = ls->fs;
+   int escapelist = NO_JUMP;  /* exit list for finished parts */
++  int emiteol_was = ls->emiteol;  /* save; nested short-ifs should not eat EOL */
+   int short_if = test_then_block(ls, &escapelist);  /* IF cond THEN block */
+   while (ls->t.token == TK_ELSEIF)
+     test_then_block(ls, &escapelist);  /* ELSEIF cond THEN block */
+@@ -1487,11 +1494,13 @@ static void ifstat (LexState *ls, int line) {
+     block(ls);  /* `else' part */
+   if (!short_if)
+     check_match(ls, TK_END, TK_IF, line);
+-  else if (ls->t.token == TK_EOL || ls->t.token == TK_EOS)
+-    luaX_next(ls);  /* eat EOL or EOS */
+-  else if (block_follow(ls, 1))
+-    ls->emiteol = 0;  /* close the short IF */
+-  else
++  else if ((ls->t.token == TK_EOL || ls->t.token == TK_EOS) && !emiteol_was)
++    luaX_next(ls);  /* eat EOL or EOS (only if outermost short-if) */
++  else if (block_follow(ls, 1)) {
++    if (!emiteol_was && ls->t.token != TK_ELSE && ls->t.token != TK_ELSEIF)
++      ls->emiteol = 0;  /* enclosing block consumed 'end'/'until'; reset */
++    /* else leave emiteol for outer short construct */
++  } else
+     check_match(ls, TK_EOL, TK_IF, line);  /* we expected EOL */
+   luaK_patchtohere(fs, escapelist);  /* patch escape list to 'if' end */
+ }
+diff --git a/lpico8lib.c b/lpico8lib.c
+index 7d4daaf0..c8b378b2 100644
+--- a/lpico8lib.c
++++ b/lpico8lib.c
+@@ -12,6 +12,7 @@
+ 
+ #include <cctype>
+ #include <cstring>
++#include <cmath>
+ 
+ #define lpico8lib_c
+ #define LUA_LIB
+@@ -97,19 +98,17 @@ static int pico8_atan2(lua_State *l) {
+ }
+ 
+ static int pico8_sqrt(lua_State *l) {
++    // PICO-8 computes floor(sqrt(x << 16)) with the abacus algorithm (Martin
++    // Guy @ UKC, June 1985, as seen in a PICO-8 JavaScript export).  pico-c:
++    // the FPU gives the same integer in a few steps -- x < 2^47 is exact in a
++    // double -- and the two loops correct the last bit.
+     int64_t root = 0, x = int64_t(lua_tonumber(l, 1).bits()) << 16;
+     if (x > 0) {
+-        // Square root by abacus algorithm, Martin Guy @ UKC, June 1985.
+-        // From a book on programming abaci by Mr C. Woo.
+-        // Observing a PICO-8 JavaScript export shows the same algorithm.
+-        for (int64_t a = int64_t(1) << 46; a; a >>= 2, root >>= 1) {
+-            if (x >= a + root) {
+-                x -= a + root;
+-                root += a << 1;
+-            }
+-        }
++        root = int64_t(std::sqrt(double(x)));
++        while (root * root > x) --root;
++        while ((root + 1) * (root + 1) <= x) ++root;
+     }
+-    lua_pushnumber(l, lua_Number::frombits(root));
++    lua_pushnumber(l, lua_Number::frombits(int32_t(root)));
+     return 1;
+ }
+ 
+diff --git a/ltable.c b/ltable.c
+index 4532cc80..354eb435 100644
+--- a/ltable.c
++++ b/ltable.c
+@@ -29,6 +29,7 @@
+ #include "ldo.h"
+ #include "lgc.h"
+ #include "lmem.h"
++#include "lctype.h"
+ #include "lobject.h"
+ #include "lstate.h"
+ #include "lstring.h"
+@@ -402,11 +403,30 @@ static Node *getfreepos (Table *t) {
+ ** put new key in its main position; otherwise (colliding node is in its main
+ ** position), new key goes to an empty position.
+ */
++/*
++** PICO-8 reads a string key that looks like a number as that number.
++** Most keys ("x", "hp", ...) cannot be one, and strtod is slow, so they are
++** turned away by their first character: after blanks a number starts with
++** a digit, a dot or a sign.  (pico-c)
++*/
++static int str_may_be_number (const char *s) {
++  while (lisspace(cast_uchar(*s))) s++;
++  return (*s >= '0' && *s <= '9') || *s == '.' || *s == '-' || *s == '+';
++}
++
+ TValue *luaH_newkey (lua_State *L, Table *t, const TValue *key) {
+   Node *mp;
++  TValue nkey;
+   if (ttisnil(key)) luaG_runerror(L, "table index is nil");
+   else if (ttisnumber(key) && luai_numisnan(L, nvalue(key)))
+     luaG_runerror(L, "table index is NaN");
++  if (ttisstring(key) && str_may_be_number(svalue(key))) {
++    lua_Number num;
++    if (luaO_str2d(svalue(key), tsvalue(key)->len, &num)) {
++      setnvalue(&nkey, num);
++      key = &nkey;
++    }
++  }
+   mp = mainposition(t, key);
+   if (!ttisnil(gval(mp)) || isdummy(mp)) {  /* main position is taken? */
+     Node *othern;
+@@ -480,7 +500,18 @@ const TValue *luaH_getstr (Table *t, TString *key) {
+ */
+ const TValue *luaH_get (Table *t, const TValue *key) {
+   switch (ttype(key)) {
+-    case LUA_TSHRSTR: return luaH_getstr(t, rawtsvalue(key));
++    case LUA_TSHRSTR: {
++      const TValue *r = luaH_getstr(t, rawtsvalue(key));
++      if (!ttisnil(r) || !str_may_be_number(svalue(key))) return r;
++      lua_Number num;
++      if (luaO_str2d(svalue(key), tsvalue(key)->len, &num)) {
++        int k;
++        lua_number2int(k, num);
++        if (luai_numeq(cast_num(k), num))
++          return luaH_getint(t, k);
++      }
++      return r;
++    }
+     case LUA_TNIL: return luaO_nilobject;
+     case LUA_TNUMBER: {
+       int k;

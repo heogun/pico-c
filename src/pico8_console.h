@@ -105,6 +105,24 @@ const char *pico8_console_pending_param(void);
 void pico8_console_open_folder(void);
 
 /*
+ * Captures (extcmd "screen", "audio_end"): where the next file goes.
+ *
+ * The files land in the desktop folder ($PICO_C_DESKTOP, or ~/Desktop).
+ * By default they are named after the cart and numbered (foo_0.png,
+ * foo_1.png, ...); after extcmd("set_filename", name) they are called
+ * exactly name.png / name.wav and a new capture overwrites the old one,
+ * like on PICO-8 0.2.7.  The returned path stays valid until the next call.
+ *
+ * 캡처(extcmd "screen", "audio_end") 파일이 갈 곳. 데스크톱 폴더
+ * ($PICO_C_DESKTOP 또는 ~/Desktop)에 저장된다. 기본 이름은 카트 이름에 번호를
+ * 붙인 것(foo_0.png, foo_1.png, ...)이고, extcmd("set_filename", name) 뒤에는
+ * 정확히 name.png / name.wav이며 새 캡처가 옛것을 덮어쓴다(PICO-8 0.2.7과 같음).
+ * 돌려준 경로는 다음 호출까지 유효하다.
+ */
+void        pico8_console_set_capture_name(const char *name);
+const char *pico8_console_capture_path(const char *ext);
+
+/*
  * Run a shell command line (used by the shell-command Lua globals).
  *
  * 셸 명령 한 줄을 실행한다(셸 명령을 쓰는 Lua 전역 함수가 쓴다).
