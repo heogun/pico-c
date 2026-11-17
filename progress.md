@@ -369,6 +369,10 @@ PICO-8은 카트의 `__lua__` 소스가 **65536바이트를 넘거나 토큰이 
       두 번째는 일회용 `tools/split_*.py` 삭제 커밋이다.
 - [x] **README 갱신** — 완료 (2026-11-17): "Source layout" 표를 `src/api|cart|shell/` 구조로,
       "Console" 절에 `edit`/`menu`/`man` 추가 및 미구현 명령 목록 정정
+- [x] **커스텀 악기 (파형 8–15)** — 완료 (2026-11-17, §7)
+- [ ] **SFX 필터** (byte 64: noiz/buzz/detune/reverb/dampen) — 다음 후보. 측정 환경(§7)은 준비됨
+- [ ] **음 타이밍 오프셋**: PICO-8 export는 음 변화가 최대 1틱(183샘플) 늦게 반영되고 시작
+      지연(34~215샘플)이 실행마다 다르다. slide/fade의 곡선이 그만큼 어긋남 (§7)
 - [ ] **성능**: 픽스포인트 연산 최적화, 병목 프로파일 (`make asan` 외에 프로파일 빌드 없음)
 - [ ] 5단계 마무리 (셸 명령):
   - [x] `edit` — `$EDITOR`(없으면 `vi`)로 카트 소스를 열고 종료 후 다시 로드 (커밋 `2dab3fd`).
@@ -477,3 +481,49 @@ src/
 
 가장 큰 파일: `api/api_gfx.cpp`(1375줄), `audio.cpp`(961), `shell/commands.cpp`(882),
 `vm.cpp`(788). 추가 분리가 필요하면 이 순서로 검토.
+
+---
+
+## 7. 커스텀 악기 (2026-11-17)
+
+### 7-1. 오라클로 소리 비교하는 법 (새로 확보)
+
+- `-x` 헤드리스에서는 오디오 믹서가 돌지 않는다: `extcmd("audio_rec")`도 빈 .wav, Lua `export()`는 멈춤.
+- **창 모드 + Lua `export("name_%d.wav")`**가 효과음 64개를 각각 .wav로 쓴다
+  (22050Hz, 16비트, 모노, 길이 = 32음 × speed × 183샘플, 삼각파 vol 7의 정점 16122).
+- **`-home <임시폴더>` 필수**: 사용자 config에 `sound_volume 0`이 있어 기본 홈에서는 export가
+  전부 무음이었다. `-volume 256` 같은 커맨드라인 값은 config에 저장되니 사용자 홈으로 돌리지 말 것.
+  (이번 측정 중 사용자 config의 `volume`이 `-volume` 실행으로 256이 되었다 — 원래 값은 미확인)
+- 자동화: `platforms/macos/oracle_audio.sh [--record]`, 판독기 `tests/tools/wavnotes.py`.
+
+### 7-2. 실측 규칙 (PICO-8 0.2.7)
+
+- 파형 8..15인 음 = 효과음 0..7을 악기로 연주. **키 24가 원래 높이**(피치 = 악기 음 + 바깥 음 - 24),
+  **음량은 곱**, 악기는 **자기 speed**로, 자기 loop/효과대로 돈다.
+- 바깥 음의 효과는 악기 위에 얹힌다: slide/vibrato/arp는 주파수 비율로, fade는 음량으로.
+  **drop은 피치를 떨어뜨리지 않고 재트리거만** 한다.
+- **재트리거(악기 시계를 0으로)**: ① 이전 음과 다른 악기(이전 음이 일반 파형이었던 경우 포함),
+  ② 피치가 바뀜 — 단 **slide 음은 제외**(레가토), ③ 효과 drop(3), ④ 효과 fade in(4).
+  그 외(같은 피치, 음량만 변경, fade out, vibrato, arp)에는 시계가 이어진다.
+- 판정은 **음량 0인 음에도** 적용된다: 음량 0 + 피치 변경이면 재트리거, 음량 0 + 같은 피치면
+  시계가 그 동안에도 흐른다. 첫 음이 음량 0이어도 거기서 시계가 시작한다.
+- 루프 없는 악기는 끝(음량 있는 마지막 음 다음)에 도달하면 다음 재트리거까지 무음.
+- 악기 안의 사용자 정의 음은 **중첩되지 않고** 같은 번호의 기본 파형(0..7)으로 연주된다.
+- 매뉴얼의 "이전 음의 음량이 0이면 재트리거"는 0.2.7 실측과 다르다(위 ③④와 피치 규칙으로 설명됨).
+
+### 7-3. 구현
+
+- `src/audio.cpp`: `struct Instrument`(채널별 악기 시계), `instrument_note()`(재트리거 규칙),
+  `instrument_sample()`(악기 진행 + 내부 효과), 공용 `note_effect()`/`sfx_loop()`/`sfx_last_note()`.
+  새 음 판정은 `floor(Channel::time)` 변화로 한다(루프로 같은 음 번호가 돌아와도 새 음).
+- `.wav` export: `pico8_audio_export_sfx_wav()` + 셸/Lua `export foo%d.wav`(전부) / `export foo.wav`(sfx 0).
+- 회귀: `tests/audio/carts/inst.p8` + `tests/audio/expected/inst.txt` 24케이스, `test.sh`에 포함
+  (python3 없으면 SKIP). 전체 **69 passed**(트랜스크립트 45 + 오디오 24). 오라클 2회 연속 24/24.
+- 테스트에서 뺀 케이스(타이밍 의존): 악기 위 slide 곡선, vibrato 끝 꼬리, fade 음량 값.
+
+### 7-4. 다음: SFX 필터
+
+- byte 64 인코딩(위키 기준, 미검증): bit0 편집 모드, bit1 noiz, bit2 buzz,
+  detune = (v/8)%3, reverb = (v/24)%3, dampen = (v/72)%3.
+- 같은 방법으로 필터별 .wav를 뽑아 파형을 비교하면 된다. 피치만이 아니라 파형/스펙트럼 비교가
+  필요하므로 `wavnotes.py`에 별도 판독 모드가 필요할 것.

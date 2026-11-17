@@ -20,7 +20,8 @@ A PICO-8 fantasy console emulator using z8lua (pico8 branch) for the Lua runtime
 - System status: `stat()` covers memory/cpu/clipboard/param/framerate, devkit
   mouse+keyboard, per-channel sfx/note, music state, and UTC/local clock
 - Math/bitwise: sin, cos, atan2, sqrt, abs, flr, ceil, min, max, mid, band, bor, bxor, bnot, shl, shr, rotl, rotr
-- Audio: sfx/music playback (approximate waveforms); `__sfx__`/`__music__`
+- Audio: sfx/music playback (approximate waveforms), custom instruments
+  (waveforms 8–15) with PICO-8's retrigger rules, `export foo%d.wav`; `__sfx__`/`__music__`
   cart sections load into RAM (songs default to PICO-8's `0x41..0x44` "no pattern")
 - Cartridge: `.p8` text and `.p8.png` image loading — `__lua__`, `__gfx__`
   (nibble-swapped), `__gff__`, `__map__`, `__sfx__`, `__music__`, `__label__`,
@@ -81,6 +82,15 @@ On macOS the transcripts can be compared with the real PICO-8 and refreshed:
 ```sh
 platforms/macos/oracle.sh            # compare every cart
 platforms/macos/oracle.sh --record   # refresh tests/expected/
+```
+
+The audio suite (`tests/audio/`, needs python3) exports sound effects as
+.wav files and reads the notes back; it runs as part of `test.sh`.  Its
+expectations come from PICO-8's own .wav export:
+
+```sh
+platforms/macos/oracle_audio.sh            # compare PICO-8 with tests/audio/expected
+platforms/macos/oracle_audio.sh --record   # refresh tests/audio/expected/
 ```
 
 ## Source layout
@@ -155,6 +165,7 @@ Syntax and runtime errors are shown in red.
 | `folder [backups\|desktop]` | Open a folder in the host file browser |
 | `backup` | Copy the loaded cart's source into `backup/` |
 | `info` | Cart stats (chars/lines) |
+| `export foo%d.wav` | Write every sound effect to its own .wav file (`export foo.wav` writes sfx 0) |
 | `edit` | Open the cart in `$EDITOR` (or `vi`), then reload it |
 | `menu [n]` | List the pause menu items, or run item `n` |
 | `config [key] [value]` | List / set session settings |
@@ -166,7 +177,7 @@ Syntax and runtime errors are shown in red.
 
 There is no built-in code, sprite, map or sound editor: `edit` hands the
 source to an external text editor.  Recognised PICO-8 commands that are not
-implemented (`export`, `import`, `splore`, `keyconfig`, `install_demos`,
+implemented (`export` of anything but .wav, `import`, `splore`, `keyconfig`, `install_demos`,
 `install_games`, `login`, `logout`, `upload`) print a "not available"
 message that points to the local alternative where there is one.
 

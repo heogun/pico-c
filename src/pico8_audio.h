@@ -95,4 +95,13 @@ int pico8_audio_music_count(void);          /* stat(55) */
 int pico8_audio_music_ticks(void);          /* stat(56) */
 int pico8_audio_music_playing(void);        /* stat(57) */
 
+/*
+ * Render a sound effect to a .wav file (22050Hz, 16 bit, mono), the way
+ * PICO-8's "export foo.wav" does.  Returns 0 on success, -1 on failure.
+ *
+ * 효과음을 .wav 파일(22050Hz, 16비트, 모노)로 쓴다. PICO-8의 "export foo.wav"
+ * 처럼. 성공하면 0, 실패하면 -1.
+ */
+int pico8_audio_export_sfx_wav(int sfx_id, const char *path);
+
 #endif /* PICO8_AUDIO_H */

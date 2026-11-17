@@ -79,8 +79,15 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] SFX note decoding (pitch/waveform/volume/effect), C-0..A440 tuning,
       speed = 183/22050 s per unit, 8 waveforms, slide/vibrato/drop/fade/arp
       effects and loop start/end
-- [~] Custom instruments (waveforms 8–15) and POKE-able filters/detune are not
-      synthesized (built-in waveforms 0–7 are)
+- [x] Custom instruments (waveforms 8–15 play SFX 0–7): pitch relative to key 24,
+      volumes multiplied, the outer effects on top, the instrument's own speed,
+      loop and effects; retrigger on a new instrument, a pitch change (not on a
+      slide), drop or fade in, otherwise the instrument's clock runs on (also
+      through silent notes); custom notes inside an instrument do not nest.
+      Checked against PICO-8's .wav export (`tests/audio/`)
+- [ ] SFX filters of byte 64 (noiz, buzz, detune, reverb, dampen) are not synthesized
+- [~] Note timing: PICO-8 applies note changes up to one tick (183 samples at
+      22050Hz) later than pico-c, which shows in slides and fades
 
 ## Map
 - [x] `mget`, `mset`
@@ -103,9 +110,6 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] `cos`, `sin`, `atan2`, `sqrt`, `abs`
 - [x] `rnd`, `srand`
 - [x] `sgn`, bitwise ops, shifts/rotations
-
-## Custom Menu Items
-- [~] `menuitem(index, label, callback)`
 
 ## Strings and Type Conversion
 - [x] `tostr`, `tonum`, `chr`, `ord`, `sub`, `split`, `type`
@@ -163,4 +167,6 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] `load`, `save`, `run`, `stop`, `resume`, `reset`, `reboot`, `shutdown`, `cls`
 - [x] `dir`/`ls`, `cd`, `mkdir`, `folder [backups|desktop|config|bbs]`, `backup`, `info`, `config`
 - [x] non-command input is evaluated as Lua (`?expr` = `print(expr)`), incl. statement-first semantics
-- [ ] `edit` (built-in editor), `splore`, `keyconfig`, `install_demos`/`install_games`, `import`/`export`, `login`/`logout`/`upload` — recognised, print honest "not available" messages
+- [x] `export foo%d.wav` (every SFX to its own file) / `export foo.wav` (SFX 0), also as the Lua function `export()`
+- [~] `edit` opens the cart in `$EDITOR` and reloads it; there is no built-in editor
+- [ ] `splore`, `keyconfig`, `install_demos`/`install_games`, `import`, `export` of html/bin/png, `login`/`logout`/`upload` — recognised, print honest "not available" messages

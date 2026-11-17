@@ -120,6 +120,18 @@ done
 # The files a cart wrote for another cart are not part of the repository.
 pc_clean_files "$CARTS_DIR" "${PC_TRANSFER_FILES[@]}"
 
+# The audio suite runs with the whole suite only (not for a single cart).
+if [ $# -eq 0 ]; then
+    # shellcheck source=audio_common.sh
+    . "$SCRIPT_DIR/audio_common.sh"
+    audio_out="$(pc_audio_suite "$BIN")"
+    printf '%s\n' "$audio_out"
+    pass=$((pass + $(printf '%s\n' "$audio_out" | grep -c '^PASS')))
+    audio_fail=$(printf '%s\n' "$audio_out" | grep -c '^FAIL')
+    fail=$((fail + audio_fail))
+    [ "$audio_fail" -gt 0 ] && failed+=("audio")
+fi
+
 printf -- '---- %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
 if [ $fail -gt 0 ]; then
     printf 'failed: %s\n' "${failed[*]}"
