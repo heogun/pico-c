@@ -90,8 +90,10 @@ int decompress_legacy(const uint8_t *src, uint8_t *dest, uint32_t maxlen)
             uint32_t a = (uint32_t)(src[i] - 0x3c) * 16 + (src[i + 1] & 0x0f);
             uint32_t b = (src[i + 1] >> 4) + 2;
             if (out >= a) {
-                while (b-- && out + 1 < maxlen)
-                    dest[out++] = dest[out - a];
+                while (b-- && out + 1 < maxlen) {
+                    dest[out] = dest[out - a];
+                    out++;
+                }
             }
             i++;
         } else if (src[i]) {

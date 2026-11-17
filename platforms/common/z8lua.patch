@@ -1,5 +1,58 @@
+diff --git a/lbaselib.c b/lbaselib.c
+index f44a9a36..487019c1 100644
+--- a/lbaselib.c
++++ b/lbaselib.c
+@@ -134,7 +134,7 @@ static int luaB_rawlen (lua_State *L) {
+   int t = lua_type(L, 1);
+   luaL_argcheck(L, t == LUA_TTABLE || t == LUA_TSTRING, 1,
+                    "table or string expected");
+-  lua_pushinteger(L, lua_rawlen(L, 1));
++  lua_pushinteger(L, (lua_Integer)lua_rawlen(L, 1));
+   return 1;
+ }
+ 
+@@ -195,7 +195,7 @@ static int luaB_type (lua_State *L) {
+ }
+ 
+ 
+-static int _empty(lua_State *L) { return 0; }
++static int _empty(lua_State *) { return 0; }
+ 
+ 
+ static int pairsmeta (lua_State *L, const char *method, int iszero,
+diff --git a/lgc.c b/lgc.c
+index 9e77f9b3..7650961d 100644
+--- a/lgc.c
++++ b/lgc.c
+@@ -91,7 +91,7 @@ static void reallymarkobject (global_State *g, GCObject *o);
+ /*
+ ** one after last element in a hash array
+ */
+-#define gnodelast(h)	gnode(h, cast(size_t, sizenode(h)))
++#define gnodelast(h)	gnode(h, cast(size_t, 1) << (h)->lsizenode)
+ 
+ 
+ /*
+@@ -450,7 +450,7 @@ static lu_mem traversetable (global_State *g, Table *h) {
+   else  /* not weak */
+     traversestrongtable(g, h);
+   return sizeof(Table) + sizeof(TValue) * h->sizearray +
+-                         sizeof(Node) * cast(size_t, sizenode(h));
++                         sizeof(Node) * (cast(size_t, 1) << h->lsizenode);
+ }
+ 
+ 
+@@ -677,7 +677,7 @@ static void freeobj (lua_State *L, GCObject *o) {
+     case LUA_TUSERDATA: luaM_freemem(L, o, sizeudata(gco2u(o))); break;
+     case LUA_TSHRSTR:
+       G(L)->strt.nuse--;
+-      /* go through */
++      [[fallthrough]];
+     case LUA_TLNGSTR: {
+       luaM_freemem(L, o, sizestring(gco2ts(o)));
+       break;
 diff --git a/llex.c b/llex.c
-index 3bb71703..2d107fb3 100644
+index 3bb71703..e011c34f 100644
 --- a/llex.c
 +++ b/llex.c
 @@ -120,6 +120,10 @@ static l_noret lexerror (LexState *ls, const char *msg, int token) {
@@ -37,6 +90,14 @@ index 3bb71703..2d107fb3 100644
      luaC_checkGC(L);
    }
    else {  /* string already present */
+@@ -553,6 +563,7 @@ static int llex (LexState *ls, SemInfo *seminfo) {
+         else if (!lisdigit(ls->current)) return '.';
+         /* else go through */
+       }
++      [[fallthrough]];
+       case '0': case '1': case '2': case '3': case '4':
+       case '5': case '6': case '7': case '8': case '9': {
+         read_numeral(ls, seminfo);
 diff --git a/lparser.c b/lparser.c
 index b119947c..53534960 100644
 --- a/lparser.c
@@ -115,7 +176,7 @@ index b119947c..53534960 100644
    luaK_patchtohere(fs, escapelist);  /* patch escape list to 'if' end */
  }
 diff --git a/lpico8lib.c b/lpico8lib.c
-index 7d4daaf0..c8b378b2 100644
+index 7d4daaf0..462faec2 100644
 --- a/lpico8lib.c
 +++ b/lpico8lib.c
 @@ -12,6 +12,7 @@
@@ -154,8 +215,106 @@ index 7d4daaf0..c8b378b2 100644
      return 1;
  }
  
+@@ -272,7 +271,7 @@ static int pico8_chr(lua_State *l) {
+     size_t numargs = lua_gettop(l);
+     if (numargs > sizeof(s)) numargs = sizeof(s);
+     for (size_t i = 0; i < numargs; i++) {
+-        s[i] = (char)(uint8_t)lua_tonumber(l, i + 1);
++        s[i] = (char)(uint8_t)lua_tonumber(l, int(i + 1));
+     }
+     lua_pushlstring(l, s, numargs);
+     return 1;
+@@ -294,7 +293,7 @@ static int pico8_ord(lua_State *l) {
+     if (n < 0 || size_t(n) >= len || count < 1)
+         return 0;
+     if (size_t(n + count) > len)
+-        count = len - n;
++        count = int(len - n);
+     // min stack is only 20. This could be a much longer string
+     lua_checkstack(l, count);
+     for (int i = 0; i < count; ++i)
+diff --git a/lstrlib.c b/lstrlib.c
+index fcc61c9a..51241147 100644
+--- a/lstrlib.c
++++ b/lstrlib.c
+@@ -134,7 +134,7 @@ static int str_byte (lua_State *L) {
+   size_t l;
+   const char *s = luaL_checklstring(L, 1, &l);
+   size_t posi = posrelat(luaL_optinteger(L, 2, 1), l);
+-  size_t pose = posrelat(luaL_optinteger(L, 3, posi), l);
++  size_t pose = posrelat(luaL_optinteger(L, 3, (lua_Integer)posi), l);
+   int n, i;
+   if (posi < 1) posi = 1;
+   if (pose > l) pose = l;
+@@ -490,7 +490,7 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
+             }
+             case '+':  /* 1 or more repetitions */
+               s++;  /* 1 match already done */
+-              /* go through */
++              [[fallthrough]];
+             case '*':  /* 0 or more repetitions */
+               s = max_expand(ms, s, p, ep);
+               break;
+@@ -545,7 +545,7 @@ static void push_onecapture (MatchState *ms, int i, const char *s,
+     ptrdiff_t l = ms->capture[i].len;
+     if (l == CAP_UNFINISHED) luaL_error(ms->L, "unfinished capture");
+     if (l == CAP_POSITION)
+-      lua_pushinteger(ms->L, ms->capture[i].init - ms->src_init + 1);
++      lua_pushinteger(ms->L, (lua_Integer)(ms->capture[i].init - ms->src_init + 1));
+     else
+       lua_pushlstring(ms->L, ms->capture[i].init, l);
+   }
+@@ -589,8 +589,8 @@ static int str_find_aux (lua_State *L, int find) {
+     /* do a plain search */
+     const char *s2 = lmemfind(s + init - 1, ls - init + 1, p, lp);
+     if (s2) {
+-      lua_pushinteger(L, s2 - s + 1);
+-      lua_pushinteger(L, s2 - s + lp);
++      lua_pushinteger(L, (lua_Integer)(s2 - s + 1));
++      lua_pushinteger(L, (lua_Integer)(s2 - s + lp));
+       return 2;
+     }
+   }
+@@ -612,8 +612,8 @@ static int str_find_aux (lua_State *L, int find) {
+       lua_assert(ms.matchdepth == MAXCCALLS);
+       if ((res=match(&ms, s1, p)) != NULL) {
+         if (find) {
+-          lua_pushinteger(L, s1 - s + 1);  /* start */
+-          lua_pushinteger(L, res - s);   /* end */
++          lua_pushinteger(L, (lua_Integer)(s1 - s + 1));  /* start */
++          lua_pushinteger(L, (lua_Integer)(res - s));   /* end */
+           return push_captures(&ms, NULL, 0) + 2;
+         }
+         else
+@@ -654,7 +654,7 @@ static int gmatch_aux (lua_State *L) {
+     ms.level = 0;
+     lua_assert(ms.matchdepth == MAXCCALLS);
+     if ((e = match(&ms, src, p)) != NULL) {
+-      lua_Integer newstart = e-s;
++      lua_Integer newstart = (lua_Integer)(e-s);
+       if (e == src) newstart++;  /* empty match? go at least one position */
+       lua_pushinteger(L, newstart);
+       lua_replace(L, lua_upvalueindex(3));
+@@ -737,7 +737,7 @@ static int str_gsub (lua_State *L) {
+   const char *src = luaL_checklstring(L, 1, &srcl);
+   const char *p = luaL_checklstring(L, 2, &lp);
+   int tr = lua_type(L, 3);
+-  size_t max_s = luaL_optinteger(L, 4, srcl+1);
++  size_t max_s = luaL_optinteger(L, 4, (lua_Integer)(srcl+1));
+   int anchor = (*p == '^');
+   size_t n = 0;
+   MatchState ms;
+@@ -772,7 +772,7 @@ static int str_gsub (lua_State *L) {
+   }
+   luaL_addlstring(&b, src, ms.src_end-src);
+   luaL_pushresult(&b);
+-  lua_pushinteger(L, n);  /* number of substitutions */
++  lua_pushinteger(L, (lua_Integer)n);  /* number of substitutions */
+   return 2;
+ }
+ 
 diff --git a/ltable.c b/ltable.c
-index 4532cc80..354eb435 100644
+index 4532cc80..cd07a47e 100644
 --- a/ltable.c
 +++ b/ltable.c
 @@ -29,6 +29,7 @@
@@ -166,6 +325,24 @@ index 4532cc80..354eb435 100644
  #include "lobject.h"
  #include "lstate.h"
  #include "lstring.h"
+@@ -330,7 +331,7 @@ void luaH_resize (lua_State *L, Table *t, int nasize, int nhsize) {
+     }
+   }
+   if (!isdummy(nold))
+-    luaM_freearray(L, nold, cast(size_t, twoto(oldhsize))); /* free old array */
++    luaM_freearray(L, nold, cast(size_t, 1) << oldhsize); /* free old array */
+ }
+ 
+ 
+@@ -378,7 +379,7 @@ Table *luaH_new (lua_State *L) {
+ 
+ void luaH_free (lua_State *L, Table *t) {
+   if (!isdummy(t->node))
+-    luaM_freearray(L, t->node, cast(size_t, sizenode(t)));
++    luaM_freearray(L, t->node, cast(size_t, 1) << t->lsizenode);
+   luaM_freearray(L, t->array, t->sizearray);
+   luaM_free(L, t);
+ }
 @@ -402,11 +403,30 @@ static Node *getfreepos (Table *t) {
  ** put new key in its main position; otherwise (colliding node is in its main
  ** position), new key goes to an empty position.
@@ -217,3 +394,26 @@ index 4532cc80..354eb435 100644
      case LUA_TNIL: return luaO_nilobject;
      case LUA_TNUMBER: {
        int k;
+@@ -490,6 +521,7 @@ const TValue *luaH_get (Table *t, const TValue *key) {
+         return luaH_getint(t, k);  /* use specialized version */
+       /* else go through */
+     }
++    [[fallthrough]];
+     default: {
+       Node *n = mainposition(t, key);
+       do {  /* check whether `key' is somewhere in the chain */
+diff --git a/lvm.c b/lvm.c
+index b6a1bae5..d23c3f37 100644
+--- a/lvm.c
++++ b/lvm.c
+@@ -230,8 +230,10 @@ lua_Number luaV_peek(struct lua_State *L, lua_Number a, int count)
+       ret |= PEEK(p, address + 1) << 8;
+       ret |= PEEK(p, address);
+       address += 2;
++      [[fallthrough]];
+     case 2:
+       ret |= PEEK(p, address + 1) << 24;
++      [[fallthrough]];
+     case 1:
+       ret |= PEEK(p, address) << 16;
+       break;
