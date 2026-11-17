@@ -16,7 +16,7 @@ PC_RUN_TESTS="$PC_ROOT/tests/tools/run_tests.py"
 
 # pc_audio_python — the python interpreter, or nothing when there is none.
 pc_audio_python() {
-    command -v python3 2>/dev/null || command -v python 2>/dev/null || true
+    pc_python
 }
 
 # pc_audio_check <name> <wav-dir> — compare a folder of .wav files with the
