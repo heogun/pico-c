@@ -41,6 +41,16 @@
 #define SAMPLES_PER_SPEED_UNIT (2.0 * 183.0)
 #define PICO8_TICK_RATE        (22050.0 / 183.0)
 
+/* PICO-8 runs its synthesizer at 22050Hz; the filters were measured there
+   and are scaled to the output rate.  The reverb delay line is long enough
+   for the longest echo (4 ticks) at 44100Hz.
+   PICO-8은 신디사이저를 22050Hz로 돌린다. 필터는 그 속도에서 측정했고 출력
+   속도에 맞춰 늘린다. 리버브 지연선은 44100Hz에서 가장 긴 메아리(4틱)를 담는다. */
+#define PICO8_SYNTH_RATE 22050.0
+#define REVERB_MAX       (2 * 732 + 8)
+
+#include "buzz_table.inc"
+
 enum {
     FX_NONE = 0, FX_SLIDE, FX_VIBRATO, FX_DROP,
     FX_FADE_IN, FX_FADE_OUT, FX_ARP_FAST, FX_ARP_SLOW
@@ -54,6 +64,23 @@ struct SfxNote {
     int effect;       /* 0..7 */
 };
 
+/*
+ * The filters of a sound effect (byte 64 of it, "editor mode / filters"):
+ *
+ *   bit 0          editor mode (pitch or tracker), no effect on the sound
+ *   bit 1          noiz    0..1
+ *   bit 2          buzz    0..1
+ *   (b / 8)  % 3   detune  0..2
+ *   (b / 24) % 3   reverb  0..2
+ *   (b / 72) % 3   dampen  0..2
+ *
+ * 효과음의 필터(64번째 바이트, "편집기 모드 / 필터"). 위 배치대로 noiz와 buzz는
+ * 비트 하나씩, detune·reverb·dampen은 3진법 자리 하나씩(0..2)이다.
+ */
+struct SfxFilters {
+    int noiz, buzz, detune, reverb, dampen;
+};
+
 struct SynthParam {
     int    instrument;
     int    key;
@@ -62,6 +89,7 @@ struct SynthParam {
     int    is_music;
     double phi;           /* unwrapped phase in cycles */
     float  last_sample;   /* noise filter state */
+    struct SfxFilters filt;
 };
 
 /*
@@ -111,10 +139,20 @@ struct Channel {
 
     /* the custom instrument of the current note */
     struct Instrument inst;
+
+    /* filter state (see channel_sample()) */
+    double phi2;          /* phase of the detune voice */
+    double noiz_left;     /* seconds until the noiz value changes */
+    float  noiz_value;
+    float  damp;          /* dampen low-pass state */
+    int    rev_level;     /* reverb of the last sound, for the tail */
+    int    rev_pos;
+    float  rev_buf[REVERB_MAX];
 };
 
 #define CHANNEL_IDLE { -1, 0.0, 0.0, 0, 1, 0, -1, 24, 0.0f, 0.0, 0.0f, -1, \
-                       { -1, 0.0, 24, -1, 24, 0.0f } }
+                       { -1, 0.0, 24, -1, 24, 0.0f }, \
+                       0.0, 0.0, 0.0f, 0.0f, 0, 0, { 0.0f } }
 
 static struct Channel channels[AUDIO_NUM_CHANS] = {
     CHANNEL_IDLE, CHANNEL_IDLE, CHANNEL_IDLE, CHANNEL_IDLE,
@@ -184,6 +222,25 @@ static int sfx_speed(int sfx_id)
 {
     int s = ram_byte(PICO8_SFX_ADDR + sfx_id * AUDIO_SFX_SIZE + 65);
     return s < 1 ? 1 : s;              /* speed must be 1..255 */
+}
+
+/*
+ * sfx_filters(sfx_id) — the filters of a sound effect.
+ *
+ * Decodes byte 64 of the sound effect (see struct SfxFilters).
+ *
+ * 효과음의 64번째 바이트를 푼다(struct SfxFilters 참고).
+ */
+static struct SfxFilters sfx_filters(int sfx_id)
+{
+    int b = ram_byte(PICO8_SFX_ADDR + sfx_id * AUDIO_SFX_SIZE + 64);
+    struct SfxFilters f;
+    f.noiz   = (b >> 1) & 1;
+    f.buzz   = (b >> 2) & 1;
+    f.detune = (b / 8) % 3;
+    f.reverb = (b / 24) % 3;
+    f.dampen = (b / 72) % 3;
+    return f;
 }
 
 /*
@@ -558,6 +615,7 @@ static void update_sfx_state(struct Channel *ch, struct SynthParam *param,
 
     param->instrument = 0;
     param->volume = 0.0f;
+    param->filt = sfx_filters(sfx_id);
 
     if (offset < 32.0) {
         int note_id = (int)floor(offset);
@@ -592,6 +650,15 @@ static void update_sfx_state(struct Channel *ch, struct SynthParam *param,
                 key    = ikey + note.key - 24;
                 if (key < 0) key = 0;
                 if (key > 63) key = 63;
+                /* The filters of the instrument add to those of the sound
+                   (measured: either one switches a filter on). */
+                struct SfxFilters f = sfx_filters(ch->inst.sfx);
+                struct SfxFilters *pf = &param->filt;
+                pf->noiz   |= f.noiz;
+                pf->buzz   |= f.buzz;
+                if (f.detune > pf->detune) pf->detune = f.detune;
+                if (f.reverb > pf->reverb) pf->reverb = f.reverb;
+                if (f.dampen > pf->dampen) pf->dampen = f.dampen;
             } else {
                 volume = 0.0f;
             }
@@ -620,6 +687,179 @@ static void update_sfx_state(struct Channel *ch, struct SynthParam *param,
 
     if (has_end && next_time >= end_time)
         ch->sfx = -1;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Filters (measured from PICO-8 0.2.7's .wav export)                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The second voice of the detune filter plays at a ratio of the frequency,
+ * which depends on the waveform: [waveform][detune - 1].  Detune 1 of the
+ * waveforms 1..5 is the exception (see detune_freq()).
+ *
+ * detune 필터의 두 번째 목소리는 주파수의 일정 비율로 울리며, 그 비율은
+ * 파형마다 다르다: [파형][detune - 1]. 파형 1..5의 detune 1만 예외다
+ * (detune_freq() 참고).
+ */
+static const float kDetuneRatio[8][2] = {
+    { 0.753f,  1.499f },   /* triangle: a fourth below / a fifth above */
+    { 0.9955f, 1.990f },
+    { 0.9955f, 1.990f },
+    { 0.9955f, 1.990f },
+    { 0.9955f, 1.990f },
+    { 0.9955f, 1.990f },
+    { 1.0f,    1.0f   },   /* noise: no second voice */
+    { 0.976f,  1.983f },   /* phaser */
+};
+
+/* The one-pole low-pass of dampen 1 and 2, as y += k * (x - y) at 22050Hz.
+   dampen 1, 2의 1차 저역 통과 필터 계수(22050Hz 기준). */
+static const float kDampenK[2] = { 0.465f, 0.265f };
+
+/*
+ * detune_freq(wave, detune, freq) — the frequency of the second voice.
+ *
+ * Detune 1 of the waveforms 1..5 is not a plain ratio: the beat it makes
+ * grows slower than the pitch (1.36Hz at key 24, 2.40Hz at key 36, 4.37Hz
+ * at key 48), which fits f * 0.996227 - 0.426Hz.  The others are ratios.
+ *
+ * 파형 1..5의 detune 1은 단순한 비율이 아니다: 맥놀이가 피치보다 느리게
+ * 빨라진다(키 24에서 1.36Hz, 36에서 2.40Hz, 48에서 4.37Hz). f * 0.996227 -
+ * 0.426Hz에 들어맞는다. 나머지는 비율이다.
+ */
+static float detune_freq(int wave, int detune, float freq)
+{
+    if (detune == 1 && wave >= 1 && wave <= 5)
+        return freq * 0.996227f - 0.426f;
+    return freq * kDetuneRatio[wave][detune - 1];
+}
+
+/*
+ * buzz_wave(table, t) — one point of a buzz table, interpolated.
+ *
+ * 선형 보간한 buzz 표의 한 점.
+ */
+static float buzz_wave(const float *table, double t)
+{
+    double p = (t - floor(t)) * 256.0;
+    int    i = (int)p;
+    float  f = (float)(p - i);
+    return table[i & 255] * (1.0f - f) + table[(i + 1) & 255] * f;
+}
+
+/*
+ * voice(wave, phase, buzz, freq, noise_state, key) — one sample of a waveform.
+ *
+ * The plain waveform comes from pico8_wave().  With buzz on, the waveforms
+ * 0..5 play from the measured table (buzz_table.inc), and the phaser is
+ * built from the buzzed triangle the way the plain one is built from the
+ * triangle.  The noise is not changed by buzz.
+ *
+ * 기본 파형은 pico8_wave()가 만든다. buzz가 켜지면 파형 0..5는 측정한 표
+ * (buzz_table.inc)로 연주하고, 위상기는 기본 위상기를 삼각파로 만들듯 buzz가
+ * 걸린 삼각파로 만든다. 노이즈는 buzz로 바뀌지 않는다.
+ */
+static float voice(int wave, double phase, int buzz, float freq,
+                   float *noise_state, int key)
+{
+    if (buzz && wave >= 0 && wave <= 5)
+        return buzz_wave(kBuzzTable[wave], phase);
+    if (buzz && wave == 7) {
+        double slow = phase * 109.0 / 110.0;
+        return (2.0f * buzz_wave(kBuzzTable[0], phase)
+                + buzz_wave(kBuzzTable[0], slow)) / 3.0f;
+    }
+    return pico8_wave(wave, phase, freq, noise_state, key);
+}
+
+/*
+ * channel_sample(ch, inv_sr, is_music) — the next sample of a channel.
+ *
+ * Moves the channel one sample forward (update_sfx_state()) and makes its
+ * sound, with the filters of the sound effect:
+ *
+ *   - noiz: the noise holds a random value for (64 - key) samples at
+ *     22050Hz instead of being filtered white noise;
+ *   - buzz: the waveform plays from the measured table (voice());
+ *   - detune: a second voice at a ratio of the frequency (kDetuneRatio),
+ *     at half the volume, the sum scaled by 5/6;
+ *   - dampen: a one-pole low-pass (kDampenK);
+ *   - reverb: an echo of the output 2 (reverb 1) or 4 (reverb 2) ticks
+ *     later at half the volume, fed back into itself.
+ *
+ * The echo goes on after the sound is over, so an idle channel still plays
+ * its tail.  Returns the sample at the scale of pico8_wave() times the
+ * volume; `is_music` says whether it belongs to the music.
+ *
+ * 채널을 샘플 하나만큼 진행하고(update_sfx_state()) 효과음의 필터를 적용한 소리를
+ * 만든다: noiz는 노이즈가 (64 - 키) 샘플(22050Hz) 동안 무작위 값 하나를
+ * 유지하고, buzz는 측정한 표로 연주하며, detune은 주파수의 일정 비율로 울리는
+ * 절반 음량의 두 번째 목소리를 더해 5/6을 곱하고, dampen은 1차 저역 통과,
+ * reverb는 2틱(reverb 1) 또는 4틱(reverb 2) 뒤에 절반 음량으로 되먹임되는
+ * 메아리다. 메아리는 소리가 끝난 뒤에도 이어지므로 쉬는 채널도 꼬리를 낸다.
+ */
+static float channel_sample(struct Channel *ch, float inv_sr, int *is_music)
+{
+    struct SynthParam param;
+    param.phi         = ch->phi;
+    param.last_sample = ch->last_sample;
+    param.freq        = 0.0f;
+    param.volume      = 0.0f;
+    param.is_music    = ch->is_music;
+    param.filt        = (struct SfxFilters){ 0, 0, 0, ch->rev_level, 0 };
+
+    int playing = ch->sfx >= 0;
+    update_sfx_state(ch, &param, inv_sr);
+    ch->last_sample = param.last_sample;
+    *is_music = param.is_music;
+
+    struct SfxFilters *f = &param.filt;
+    float out = 0.0f;
+    if (param.volume > 0.0f) {
+        int wave = param.instrument;
+        if (wave == 6 && f->noiz) {
+            ch->noiz_left -= inv_sr;
+            if (ch->noiz_left <= 0.0) {
+                ch->noiz_value = ((rand() / (float)RAND_MAX) * 2.0f - 1.0f) * 0.25f;
+                ch->noiz_left += (64 - param.key) / PICO8_SYNTH_RATE;
+                if (ch->noiz_left <= 0.0) ch->noiz_left = 1.0 / PICO8_SYNTH_RATE;
+            }
+            out = ch->noiz_value;
+        } else {
+            out = voice(wave, param.phi, f->buzz, param.freq,
+                        &ch->last_sample, param.key);
+            if (f->detune && wave != 6) {
+                ch->phi2 += detune_freq(wave, f->detune, param.freq) * inv_sr;
+                if (ch->phi2 > 1048576.0) ch->phi2 -= 1048576.0;
+                float second = voice(wave, ch->phi2, f->buzz, param.freq,
+                                     &ch->last_sample, param.key);
+                out = (out + 0.5f * second) * (5.0f / 6.0f);
+            }
+        }
+        out *= param.volume;
+    }
+
+    if (f->dampen) {
+        float k = 1.0f - powf(1.0f - kDampenK[f->dampen - 1],
+                              (float)(PICO8_SYNTH_RATE * inv_sr));
+        ch->damp += k * (out - ch->damp);
+        out = ch->damp;
+    } else {
+        ch->damp = out;
+    }
+
+    if (playing) ch->rev_level = f->reverb;
+    int level = ch->rev_level;
+    int pos = ch->rev_pos;
+    if (level) {
+        int delay = (int)lrint((level == 1 ? 366.0 : 732.0) / (PICO8_SYNTH_RATE * inv_sr));
+        if (delay >= REVERB_MAX) delay = REVERB_MAX - 1;
+        out += 0.5f * ch->rev_buf[(pos - delay + REVERB_MAX) % REVERB_MAX];
+    }
+    ch->rev_buf[pos] = out;
+    ch->rev_pos = (pos + 1) % REVERB_MAX;
+    return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -843,23 +1083,10 @@ static void fill_buffer(float *buf, int samples)
                 ch->sfx_music = -1;
             }
 
-            struct SynthParam param;
-            param.phi         = ch->phi;
-            param.last_sample = ch->last_sample;
-            param.freq        = 0.0f;
-            param.volume      = 0.0f;
-            param.is_music    = ch->is_music;
-
-            update_sfx_state(ch, &param, inv_sr);
-            ch->last_sample = param.last_sample;
-
-            if (param.volume > 0.0f) {
-                float w = pico8_wave(param.instrument, param.phi, param.freq,
-                                     &ch->last_sample, param.key);
-                float vol = param.volume;
-                if (param.is_music) vol *= music_fade_volume;
-                mix += w * vol * 0.5f;
-            }
+            int is_music = 0;
+            float w = channel_sample(ch, inv_sr, &is_music);
+            if (is_music) w *= music_fade_volume;
+            mix += w * 0.5f;
         }
 
         if (mix > 1.0f) mix = 1.0f;
@@ -1242,18 +1469,8 @@ int pico8_audio_export_sfx_wav(int sfx_id, const char *path)
     float inv_sr = 1.0f / WAV_RATE;
 
     for (int i = 0; i < samples; i++) {
-        struct SynthParam param;
-        param.phi = ch.phi;
-        param.last_sample = ch.last_sample;
-        param.freq = 0.0f;
-        param.volume = 0.0f;
-        param.is_music = 0;
-        update_sfx_state(&ch, &param, inv_sr);
-
-        float out = 0.0f;
-        if (param.volume > 0.0f)
-            out = pico8_wave(param.instrument, param.phi, param.freq,
-                             &ch.last_sample, param.key) * param.volume * WAV_GAIN;
+        int is_music;
+        float out = channel_sample(&ch, inv_sr, &is_music) * WAV_GAIN;
         if (out > 32767.0f) out = 32767.0f;
         if (out < -32768.0f) out = -32768.0f;
         put_le(f, (unsigned)(int16_t)lrintf(out) & 0xffff, 2);

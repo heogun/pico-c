@@ -21,7 +21,8 @@ A PICO-8 fantasy console emulator using z8lua (pico8 branch) for the Lua runtime
   mouse+keyboard, per-channel sfx/note, music state, and UTC/local clock
 - Math/bitwise: sin, cos, atan2, sqrt, abs, flr, ceil, min, max, mid, band, bor, bxor, bnot, shl, shr, rotl, rotr
 - Audio: sfx/music playback (approximate waveforms), custom instruments
-  (waveforms 8–15) with PICO-8's retrigger rules, `export foo%d.wav`; `__sfx__`/`__music__`
+  (waveforms 8–15) with PICO-8's retrigger rules, the SFX filters (noiz,
+  buzz, detune, reverb, dampen) measured from PICO-8's own output, `export foo%d.wav`; `__sfx__`/`__music__`
   cart sections load into RAM (songs default to PICO-8's `0x41..0x44` "no pattern")
 - Cartridge: `.p8` text and `.p8.png` image loading — `__lua__`, `__gfx__`
   (nibble-swapped), `__gff__`, `__map__`, `__sfx__`, `__music__`, `__label__`,

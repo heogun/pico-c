@@ -54,7 +54,14 @@ own export of the same cart.
 | File | What it does |
 |------|--------------|
 | `audio/carts/inst.p8` | custom instruments (waveforms 8–15): the retrigger rules, the instrument clock, effects on top, nesting, loops |
-| `audio/expected/inst.txt` | `<sfx> <window> <count> \| <notes>`, recorded with `platforms/macos/oracle_audio.sh --record` |
+| `audio/carts/filters.p8` | the SFX filters: buzz on every waveform, dampen, detune, reverb, noiz, filters of an instrument |
+| `audio/expected/<name>.txt` | one check per line, recorded with `platforms/macos/oracle_audio.sh --record` (see below) |
+
+A line is either `<sfx> <window> <count> | <notes>` (the notes, compared
+exactly) or `<sfx> <feature> [arg] | <value> ~<tol>` (a number compared
+within a tolerance): `rms` (loudness), `harm K` (the K-th harmonic against
+the fundamental), `peak R` (the spectrum at R times the fundamental: a
+second voice), `hold` (the hold length of noiz noise).
 
 Only the pitch is compared, and the first 200 samples of every window are
 skipped: PICO-8's export starts every change a little late (by up to one

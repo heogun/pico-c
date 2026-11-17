@@ -38,8 +38,9 @@ make asan                                # AddressSanitizer 빌드
   카트의 `export("name_%d.wav")`로 효과음별 .wav(22050Hz)를 뽑는다. 반드시 `-home <임시폴더>`로
   돌릴 것 — 사용자 config가 `sound_volume 0`이라 기본 홈에서는 무음이 나오고, 사용자 설정/카트도
   건드리게 된다(`-volume` 같은 옵션은 config에 저장됨). `oracle_audio.sh`가 이 절차를 따른다.
-- 비교는 `tests/tools/wavnotes.py`(창별 피치 판독). PICO-8 export는 변화가 최대 1틱(183샘플) 늦고
-  시작 지연이 실행마다 달라서 창 앞 200샘플을 버리고 피치만 비교한다.
+- 비교는 `tests/tools/wavnotes.py`(창별 피치 판독 + rms/harm/peak/hold 특징값). PICO-8 export는 변화가
+  최대 1틱(183샘플) 늦고 시작 지연과 **오실레이터 위상이 실행/효과음마다 달라서** 샘플 단위 비교는
+  안 된다(위상을 맞춘 뒤에만 의미 있음). 피치는 창 앞 200샘플을 버리고, 나머지는 허용 오차로 비교한다.
 
 ## 소스 구조
 
@@ -50,7 +51,8 @@ make asan                                # AddressSanitizer 빌드
 | `src/cart/` | 카트 I/O: `cart_read`(.p8/.p8.png 로드, `#include`, 소스 제한 검사), `cart_write`(.p8), `cart_png`(.p8.png 인코더), `cart_compress`(`:c:`/PXA 해제), `cart_data`, `cart_state`. 내부 헤더 `cart_internal.h` |
 | `src/shell/` | 부트 스플래시·콘솔(`console`), 명령 표(`commands.cpp`의 `kShellCommands`), 호스트 파일/폴더(`host`), 키 입력(`input`). 내부 헤더 `shell_internal.h` |
 | `src/vm.cpp` | Lua VM, 콜백 호출, 에러 블록 출력, `pico8_apply_parity()`(전역 API 패리티) |
-| `src/audio.cpp` | 신디사이저 + 뮤직 시퀀서 + 커스텀 악기(`instrument_note`/`instrument_sample`) + `.wav` export |
+| `src/audio.cpp` | 신디사이저 + 뮤직 시퀀서 + 커스텀 악기(`instrument_note`/`instrument_sample`) + SFX 필터(`channel_sample`) + `.wav` export |
+| `src/buzz_table.inc` | buzz 파형 표 (생성기 `tools/gen_buzz.py`, 입력은 PICO-8 .wav export) |
 | `src/gfx.cpp` `src/input.cpp` `src/memory.cpp` | 화면/입력/RAM의 호스트 측 |
 | `src/charset.cpp` + `charset_table.inc` | charset 바이트 ↔ UTF-8 (생성기 `tools/gen_charset.py`) |
 | `src/font_table.inc` | 256글리프 비트맵 (생성기 `tools/gen_font.py`, 입력 `tools/font_dump.txt`) |
