@@ -1,0 +1,22 @@
+# SFX filter readouts, recorded from PICO-8 0.2.7.
+# <sfx> <window> <count> | <notes>         compared exactly
+# <sfx> <feature> [arg]  | <value> ~<tol>  compared within the tolerance
+# (see tests/tools/wavnotes.py; refresh with platforms/macos/oracle_audio.sh --record)
+8 rms | 0.578 ~0.01
+9 rms | 0.505 ~0.01
+10 rms | 0.315 ~0.02
+11 rms | 0.500 ~0.01
+12 rms | 0.500 ~0.01
+13 rms | 0.231 ~0.01
+14 harm 5 | 0.201 ~0.01
+15 harm 5 | 0.175 ~0.01
+16 harm 5 | 0.125 ~0.01
+17 peak 0.753 | 0.482 ~0.05
+18 peak 1.499 | 0.506 ~0.05
+19 366 8 | 0 0 0 0 0 0 . .
+20 366 8 | 0 . 0 . 0 . 0 .
+25 366 8 | 0 . . . . . . .
+21 hold | 40.000 ~0
+22 hold | 16.000 ~0
+23 rms | 0.504 ~0.01
+24 rms | 0.504 ~0.01

@@ -85,7 +85,16 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
       slide), drop or fade in, otherwise the instrument's clock runs on (also
       through silent notes); custom notes inside an instrument do not nest.
       Checked against PICO-8's .wav export (`tests/audio/`)
-- [ ] SFX filters of byte 64 (noiz, buzz, detune, reverb, dampen) are not synthesized
+- [x] SFX filters of byte 64, measured from PICO-8's .wav export (`tests/audio/`):
+      noiz (sample-and-hold noise, held 64 - key samples at 22050Hz), buzz
+      (measured one-period tables, `src/buzz_table.inc`), detune (second voice
+      at half volume, ratio per waveform), reverb (echo after 2 / 4 ticks at
+      half volume, fed back), dampen (one-pole low-pass); an instrument's
+      filters add to those of the sound
+- [~] Filter details that differ: the buzzed saw below key 24 (PICO-8 is ~8%
+      quieter there), detune of the noise and buzz of the noise (left plain),
+      the reverb of an instrument (PICO-8 cuts its tail at the end of the
+      outer note, pico-c lets it ring)
 - [~] Note timing: PICO-8 applies note changes up to one tick (183 samples at
       22050Hz) later than pico-c, which shows in slides and fades
 

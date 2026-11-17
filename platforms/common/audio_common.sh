@@ -24,19 +24,48 @@ pc_audio_python() {
     command -v python3 2>/dev/null || command -v python 2>/dev/null || true
 }
 
+# Every line of an expected file is one of:
+#   <sfx> <window> <count> | <notes>          the notes, compared exactly
+#   <sfx> <feature> [arg]  | <value> ~<tol>   a feature (rms, harm K, peak R,
+#                                             hold), compared within <tol>
+# 기대 파일의 줄은 음 판독(정확히 비교) 아니면 특징값(허용 오차 안에서 비교)이다.
+
+# pc_audio_read <dir> <name> <sfx> <args...> — what wavnotes.py reads.
+pc_audio_read() {
+    local dir="$1" name="$2" sfx="$3"
+    shift 3
+    "$(pc_audio_python)" -I "$PC_WAVNOTES" "$dir/${name}_$sfx.wav" "$@" 2>/dev/null
+}
+
 # pc_audio_check <name> <wav-dir> — compare the readouts of a folder of
-# .wav files with the expected file.  Prints a line per sound effect and
-# returns the number of mismatches.
+# .wav files with the expected file.  Prints a line per check and returns
+# the number of mismatches.
 pc_audio_check() {
-    local name="$1" dir="$2" py fail=0 sfx win cnt bar want got
-    py="$(pc_audio_python)"
-    while read -r sfx win cnt bar want; do
-        case "$sfx" in ''|\#*) continue ;; esac
-        got="$("$py" -I "$PC_WAVNOTES" "$dir/${name}_$sfx.wav" "$win" "$cnt" 2>/dev/null)"
-        if [ "$got" = "$want" ]; then
-            printf 'PASS  %s sfx %s\n' "$name" "$sfx"
+    local name="$1" dir="$2" fail=0 line left right sfx args want tol got ok
+    while IFS= read -r line; do
+        case "$line" in ''|\#*) continue ;; esac
+        left="${line%%|*}"
+        right="${line#*|}"
+        read -r sfx args <<< "$left"
+        right="$(printf '%s' "$right" | sed 's/^ *//')"
+        # shellcheck disable=SC2086
+        got="$(pc_audio_read "$dir" "$name" "$sfx" $args)"
+        case "$right" in
+            *'~'*)
+                want="${right%%~*}"; tol="${right#*~}"
+                ok="$(awk -v g="$got" -v w="$want" -v t="$tol" \
+                      'BEGIN { d = g - w; if (d < 0) d = -d; print (g != "" && d <= t + 1e-9) ? 1 : 0 }')"
+                ;;
+            *)
+                want="$right"
+                [ "$got" = "$want" ] && ok=1 || ok=0
+                ;;
+        esac
+        if [ "$ok" = 1 ]; then
+            printf 'PASS  %s sfx %s %s\n' "$name" "$sfx" "$args"
         else
-            printf 'FAIL  %s sfx %s\n      want %s\n      got  %s\n' "$name" "$sfx" "$want" "$got"
+            printf 'FAIL  %s sfx %s %s\n      want %s\n      got  %s\n' \
+                "$name" "$sfx" "$args" "$right" "$got"
             fail=$((fail + 1))
         fi
     done < "$PC_AUDIO_DIR/expected/$name.txt"
@@ -44,10 +73,10 @@ pc_audio_check() {
 }
 
 # pc_audio_record <name> <wav-dir> — rewrite the expected file from a folder
-# of .wav files (the sound effects, windows and counts stay as they are).
+# of .wav files.  The checks and the tolerances stay as they are; only the
+# notes and the values are replaced.
 pc_audio_record() {
-    local name="$1" dir="$2" py exp tmp sfx win cnt rest
-    py="$(pc_audio_python)"
+    local name="$1" dir="$2" exp tmp line left right sfx args tol got
     exp="$PC_AUDIO_DIR/expected/$name.txt"
     tmp="$exp.tmp"
     : > "$tmp"
@@ -55,9 +84,15 @@ pc_audio_record() {
         case "$line" in
             ''|\#*) printf '%s\n' "$line" >> "$tmp"; continue ;;
         esac
-        read -r sfx win cnt rest <<< "$line"
-        printf '%s %s %s | %s\n' "$sfx" "$win" "$cnt" \
-            "$("$py" -I "$PC_WAVNOTES" "$dir/${name}_$sfx.wav" "$win" "$cnt")" >> "$tmp"
+        left="${line%%|*}"
+        right="${line#*|}"
+        read -r sfx args <<< "$left"
+        # shellcheck disable=SC2086
+        got="$(pc_audio_read "$dir" "$name" "$sfx" $args)"
+        case "$right" in
+            *'~'*) tol="${right#*~}"; printf '%s| %s ~%s\n' "$left" "$got" "$tol" >> "$tmp" ;;
+            *)     printf '%s| %s\n' "$left" "$got" >> "$tmp" ;;
+        esac
     done < "$exp"
     mv "$tmp" "$exp"
 }

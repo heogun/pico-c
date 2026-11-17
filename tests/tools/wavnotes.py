@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """wavnotes.py — read the notes back out of a .wav file.
 
-Usage: wavnotes.py FILE.wav WINDOW COUNT
+Usage: wavnotes.py FILE.wav WINDOW COUNT     the notes, window by window
+       wavnotes.py FILE.wav rms             loudness of the steady part
+       wavnotes.py FILE.wav harm K          K-th harmonic / fundamental
+       wavnotes.py FILE.wav peak RATIO      spectrum at RATIO * fundamental
+                                            / fundamental (a second voice)
+       wavnotes.py FILE.wav hold            median length of the flat runs of
+                                            3 samples or more (noiz noise)
+
+The features (all but the first form) read samples 600..2600 of a note at
+key 24, the fundamental being 261.63Hz; they print one number, which the
+audio suite compares with a tolerance.
 
 Cuts the sound into COUNT windows of WINDOW samples (22050Hz) and prints,
 for every window, the pitch it holds as a key relative to key 24 (C-2 in
@@ -12,6 +22,9 @@ window makes the output of PICO-8 and of pico-c comparable.
 
 Only the pitch is read, not the volume: the pitch shows where the clock of
 a custom instrument is, which is what the audio tests check.
+
+특징값(첫 형식 말고 전부)은 키 24 음(기본음 261.63Hz)의 샘플 600..2600을
+읽어 숫자 하나를 찍고, 오디오 스위트는 그것을 허용 오차와 함께 비교한다.
 
 wav 파일에서 음을 다시 읽어 낸다. 소리를 WINDOW 샘플(22050Hz)짜리 창 COUNT개로
 자르고, 창마다 담긴 피치를 키 24(PICO-8 트래커의 C-2) 기준 키로 찍는다. 소리가
@@ -48,5 +61,46 @@ def notes(samples, window, count):
         out.append('%d' % round(12 * math.log2(freq / 261.63)))
     return ' '.join(out)
 
+FUNDAMENTAL = 261.63
+STEADY = (600, 2600)
+
+def component(samples, freq):
+    """Amplitude of one frequency in the steady part (a single DFT bin).
+    안정 구간에서 한 주파수의 진폭(DFT 한 칸)."""
+    a, b = STEADY
+    re = im = 0.0
+    for n in range(a, b):
+        w = 2 * math.pi * freq * n / 22050
+        re += samples[n] * math.cos(w)
+        im += samples[n] * math.sin(w)
+    return 2 * math.hypot(re, im) / (b - a)
+
+def feature(samples, name, arg):
+    a, b = STEADY
+    if name == 'rms':
+        return math.sqrt(sum(x * x for x in samples[a:b]) / (b - a)) / 16122
+    if name == 'harm':
+        return component(samples, arg * FUNDAMENTAL) / component(samples, FUNDAMENTAL)
+    if name == 'peak':
+        return component(samples, arg * FUNDAMENTAL) / component(samples, FUNDAMENTAL)
+    if name == 'hold':
+        runs, length = [], 1
+        for x, y in zip(samples[a:b], samples[a + 1:b]):
+            if x == y:
+                length += 1
+            else:
+                runs.append(length)
+                length = 1
+        # PICO-8 sometimes ramps from one value to the next; the ramp's
+        # 1-sample runs are not holds.  PICO-8은 가끔 값 사이를 경사로 잇는다.
+        # 그 1샘플짜리 구간은 유지 구간이 아니다.
+        runs = sorted(r for r in runs if r >= 3)
+        return runs[len(runs) // 2] if runs else 0
+    raise SystemExit('unknown feature: ' + name)
+
 if __name__ == '__main__':
-    print(notes(read(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])))
+    if sys.argv[2].isdigit():
+        print(notes(read(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])))
+    else:
+        arg = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
+        print('%.3f' % feature(read(sys.argv[1]), sys.argv[2], arg))
