@@ -1,3 +1,31 @@
+/*
+ * main.cpp — the host: the window, the loop and the life of a cart.
+ *
+ * This is where the SDL window lives, where the events of the host are
+ * turned into buttons and text, and where the machine is driven: the boot
+ * splash first, then the shell, and then the cart that is running.
+ *
+ * SDL 창이 있고, 호스트의 이벤트가 버튼과 텍스트로 바뀌고, 기계가 돌아가는
+ * 자리다. 먼저 부팅 화면, 그다음 셸, 그다음 실행 중인 카트.
+ *
+ * The program has three modes, and the mode decides what a turn of the
+ * loop does: the boot splash draws itself, the shell draws itself, and a
+ * running cart gets its _update and its _draw.  A cart that has no
+ * _update60 is updated every other frame, which is how PICO-8 reaches 60
+ * frames per second with a cart that only does _update.
+ *
+ * 프로그램에는 세 가지 모드가 있고, 루프 한 바퀴가 하는 일은 모드가 정한다.
+ * 부팅 화면은 스스로를 그리고, 셸도 스스로를 그리고, 실행 중인 카트는
+ * _update와 _draw를 받는다. _update60이 없는 카트는 한 프레임 건너 한 번씩
+ * 업데이트되는데, PICO-8이 30fps짜리 카트로 60fps를 만드는 방법이 이것이다.
+ *
+ * The -headless mode runs a cart without a window and writes what the cart
+ * prints to the standard output; that is the mode the test suite uses.
+ *
+ * -headless 모드는 창 없이 카트를 돌리고 카트가 출력한 것을 표준 출력으로
+ * 쓴다. 테스트 스위트가 쓰는 모드가 이것이다.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,14 +63,24 @@ static uint32_t boot_start = 0;
 static int      boot_skipped = 0;
 static const char *pending_cart = NULL;   /* cartridge passed on the command line */
 
+/* The three steps of the life of a cart; the definitions are further down. */
 static void enter_shell(void);
 static void start_cart(void);
 static void stop_cart_to_shell(void);
 
 /* ------------------------------------------------------------------ */
 /*  Key translation for the shell                                      */
-/* ------------------------------------------------------------------ */
 
+/*
+ * translate_shell_key(sym) — the key the shell understands.
+ *
+ * The SDL key codes are turned into the codes the shell uses: the ASCII
+ * control characters for the usual keys and the PICO8_KEY_* constants for
+ * the cursor keys and the tab.  A key the shell does not use gives 0.
+ *
+ * SDL의 키 코드를 셸이 쓰는 코드로 바꾼다. 평범한 키는 ASCII 제어 문자로,
+ * 방향키와 탭은 PICO8_KEY_* 상수로 바꾼다. 셸이 쓰지 않는 키는 0이 된다.
+ */
 static int translate_shell_key(SDL_Keycode sym)
 {
     switch (sym) {
@@ -62,7 +100,18 @@ static int translate_shell_key(SDL_Keycode sym)
     }
 }
 
-/* Convert host window pixel coordinates to PICO-8 screen pixels (0..127). */
+/*
+ * mouse_screen_pos(wx, wy, sx, sy) — where in the PICO-8 screen a click is.
+ *
+ * The size of the window is asked from SDL, because the window can be
+ * resized and the logical size stays at 128x128.  The result is clamped to
+ * the screen, so a click on the border of the window still lands on a
+ * pixel.
+ *
+ * 창 크기는 SDL에 물어본다. 창은 크기를 바꿀 수 있지만 논리 크기는 128x128으로
+ * 그대로이기 때문이다. 결과는 화면 안으로 잘라내므로, 창 테두리를 눌러도
+ * 픽셀 하나에 정확히 닿는다.
+ */
 static void mouse_screen_pos(int wx, int wy, int *sx, int *sy)
 {
     int ww = PICO8_SCREEN_W, wh = PICO8_SCREEN_H;
@@ -79,6 +128,20 @@ static void mouse_screen_pos(int wx, int wy, int *sx, int *sy)
 
 /* Track POKE(0x5f2d, flags): flag 0x4 enables pointer lock (relative mouse),
    flag 0x1 additionally enables keyboard text capture while running. */
+
+/*
+ * update_devkit_modes() — follow the devkit flags of the cart.
+ *
+ * POKE(0x5f2d, flags) switches the devkit devices on and off.  The flag
+ * 0x4 puts the mouse into the relative mode (the pointer is locked and
+ * only the movement is reported) and the flag 0x1 turns the keyboard text
+ * capture on while a cart is running.  The shell always has the text
+ * capture on.
+ *
+ * 카트의 POKE(0x5f2d, flags)를 따라간다. 플래그 0x4는 마우스를 상대 모드로
+ * (포인터가 잠기고 이동량만 보고된다), 플래그 0x1은 카트가 도는 동안 키보드
+ * 텍스트 입력을 켠다. 셸은 언제나 텍스트 입력이 켜져 있다.
+ */
 static void update_devkit_modes(void)
 {
     int devkit = (app_mode == PICO8_APP_RUN) ? pico8_ram[0x5f2d] : 0;
@@ -98,6 +161,17 @@ static void update_devkit_modes(void)
     }
 }
 
+/*
+ * process_events() — everything the host has to do with the events.
+ *
+ * Reads the SDL events of the frame and turns them into what the emulator
+ * needs: keys for the shell, buttons for the cart, text for the devkit
+ * keyboard, and the mouse for the devkit mouse.
+ *
+ * 한 프레임의 SDL 이벤트를 읽고 에뮬레이터가 필요로 하는 것으로 바꾼다.
+ * 셸에 줄 키, 카트에 줄 버튼, 데브킷 키보드에 줄 텍스트, 데브킷 마우스에 줄
+ * 마우스 정보가 여기서 나온다.
+ */
 static void process_events(void)
 {
     SDL_Event ev;
@@ -205,6 +279,16 @@ static void process_events(void)
     }
 }
 
+/*
+ * init_sdl() — open the window.
+ *
+ * Creates the window, the renderer and the texture of the screen.  The
+ * texture is a streaming one, so the pixels of the screen are pushed into
+ * it every frame.
+ *
+ * 창, 렌더러, 화면 텍스처를 만든다. 텍스처는 스트리밍용이므로 화면의 픽셀을
+ * 매 프레임마다 새로 밀어 넣는다.
+ */
 static int init_sdl(void)
 {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) < 0) {
@@ -244,6 +328,14 @@ static int init_sdl(void)
     return 0;
 }
 
+/*
+ * render_frame() — show the screen.
+ *
+ * Renders the RAM of the screen into the pixel buffer, pushes it into the
+ * texture and draws it.
+ *
+ * 화면 RAM을 픽셀 버퍼로 렌더링하고 텍스처에 밀어 넣어 그린다.
+ */
 static void render_frame(void)
 {
     pico8_render_screen(pixels, PICO8_SCREEN_W * 4, 1);
@@ -293,6 +385,17 @@ static void stop_cart_to_shell(void)
     pico8_console_shell_reset();
 }
 
+/*
+ * handle_console_requests() — do what the shell asked for.
+ *
+ * The shell raises a request when a command wants to change what the
+ * machine does: reboot, load a cart, run, pause or quit.  The requests
+ * are handled here, at a safe place in the frame.
+ *
+ * 셸은 어떤 명령이 기계의 상태를 바꾸려 할 때 요청을 올린다: 재부팅, 카트
+ * 불러오기, 실행, 일시정지, 종료. 요청은 여기, 프레임 안의 안전한 지점에서
+ * 처리된다.
+ */
 static void handle_console_requests(void)
 {
     if (pico8_console_request_reboot) {
@@ -345,8 +448,21 @@ static void handle_console_requests(void)
 
 /* ------------------------------------------------------------------ */
 /*  Main loop                                                          */
-/* ------------------------------------------------------------------ */
 
+/*
+ * main_loop() — the loop that runs the machine.
+ *
+ * One turn of the loop is one frame of the PICO-8.  The boot splash and
+ * the shell draw themselves, while a running cart gets its update and its
+ * draw.  A cart that has no _update60 is updated every other frame, which
+ * is how PICO-8 reaches 60 frames per second with a cart that only does
+ * _update.
+ *
+ * 루프 한 바퀴가 PICO-8의 한 프레임이다. 부팅 화면과 셸은 스스로를 그리고,
+ * 실행 중인 카트는 update와 draw를 받는다. _update60이 없는 카트는 한 프레임
+ * 건너 한 번씩 업데이트되는데, PICO-8이 30fps짜리 카트로 60fps를 만드는
+ * 방법이 이것이다.
+ */
 static void main_loop(void)
 {
     uint32_t frame_time = 1000 / PICO8_FPS;
@@ -405,8 +521,24 @@ static void main_loop(void)
     }
 }
 
-/* ------------------------------------------------------------------ */
-
+/*
+ * main(argc, argv) — start the emulator.
+ *
+ *   pico-c <cart.p8>              run a cart
+ *   pico-c -p <args> <cart.p8>    run a cart with a parameter string
+ *   pico-c -headless <cart.p8>    run a cart without a window
+ *
+ * The headless mode is what the test suite uses: it runs the cart for a
+ * limited number of frames and writes what the cart prints to the standard
+ * output.
+ *
+ *   pico-c <cart.p8>              카트 실행
+ *   pico-c -p <args> <cart.p8>    파라미터 문자열과 함께 카트 실행
+ *   pico-c -headless <cart.p8>    창 없이 카트 실행
+ *
+ * 헤드리스 모드가 테스트 스위트가 쓰는 모드다. 정해진 프레임 수만큼 카트를
+ * 돌리고, 카트가 출력한 것을 표준 출력으로 쓴다.
+ */
 int main(int argc, char *argv[])
 {
     const char *cart_path = NULL;

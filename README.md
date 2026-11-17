@@ -83,6 +83,43 @@ platforms/macos/oracle.sh            # compare every cart
 platforms/macos/oracle.sh --record   # refresh tests/expected/
 ```
 
+## Source layout
+
+The sources are split so that a change stays in one place.
+
+| Path | Content |
+|------|---------|
+| `src/pico8.h` | the umbrella header; it includes the eight subsystem headers |
+| `src/pico8_core.h` | the machine constants, the RAM map and the fixed point helpers |
+| `src/pico8_gfx.h` | the screen: rendering, pixels, glyphs, palette |
+| `src/pico8_input.h` | the buttons, the mouse and the devkit keyboard |
+| `src/pico8_audio.h` | starting and stopping the sound |
+| `src/pico8_cart.h` | reading and writing the cartridge files |
+| `src/pico8_console.h` | the boot splash, the shell and the pause menu |
+| `src/pico8_vm.h` | the bridge to the Lua virtual machine |
+| `src/pico8_charset.h` | between PICO-8's font codes and UTF-8 |
+| `src/api/` | the Lua API, one module per subsystem (`api_gfx`, `api_text`, `api_memory`, `api_input`, `api_audio`, `api_system`, `api_cart`, `api_lua`), each with its own table; `api_internal.h` holds what they share |
+| `src/api/api_registry.cpp` | calls the registration function of every module |
+| `src/cart/` | the cartridge files: `cart_read` (.p8 / .p8.png loading, `#include`, size limits), `cart_write` (.p8), `cart_png` (the .p8.png encoder), `cart_compress` (`:c:` and PXA decompression), `cart_data`, `cart_state`; private header `cart_internal.h` |
+| `src/shell/` | the boot splash and console (`console`), the command table (`commands`), the host files and folders (`host`), the keyboard (`input`); private header `shell_internal.h` |
+| `src/pxa.cpp` | the PXA compressor (the code of a .p8.png cartridge) |
+| `src/tokens.cpp` | the token counter that guards the 8192 token limit |
+| `src/charset.cpp` | the conversion between charset bytes and UTF-8 |
+| `src/util.cpp` | the small string, path and hex helpers shared by the other files |
+| `src/gfx.cpp`, `src/input.cpp`, `src/memory.cpp` | the host side of the screen, the buttons and the RAM |
+| `src/audio.cpp` | the synthesiser and the music sequencer |
+| `src/vm.cpp` | the Lua VM, the cart callbacks and the console evaluation |
+| `src/main.cpp` | the host loop: the window, the events and the frame timing |
+| `src/charset_table.inc`, `src/font_table.inc` | generated tables (`tools/gen_charset.py`, `tools/gen_font.py`) |
+
+The Makefile picks up every `src/*.cpp` and `src/*/*.cpp`, so a new file
+needs no change to the build.
+
+Every function carries a doc comment in English and in Korean.  The
+comments at the top of a file describe the file as a whole; the comment
+above a function says what it does, which arguments it takes and what it
+returns.
+
 
 ## Controls
 
@@ -118,15 +155,20 @@ Syntax and runtime errors are shown in red.
 | `folder [backups\|desktop]` | Open a folder in the host file browser |
 | `backup` | Copy the loaded cart's source into `backup/` |
 | `info` | Cart stats (chars/lines) |
+| `edit` | Open the cart in `$EDITOR` (or `vi`), then reload it |
+| `menu [n]` | List the pause menu items, or run item `n` |
 | `config [key] [value]` | List / set session settings |
 | `stop` / `resume` / `reset` | Stop / continue a cart; `reset` restores the draw state |
 | `reboot` | Restart the boot splash |
 | `cls` / `clear` | Clear the screen |
+| `man` | Same as `help` |
 | `shutdown` / `quit` / `exit` | Exit |
 
-Recognised PICO-8 commands that are not implemented yet (`edit`, `export`,
-`import`, `splore`, `keyconfig`, `install_demos`, `install_games`, `login`,
-`logout`, `upload`) print an honest "not available" message.
+There is no built-in code, sprite, map or sound editor: `edit` hands the
+source to an external text editor.  Recognised PICO-8 commands that are not
+implemented (`export`, `import`, `splore`, `keyconfig`, `install_demos`,
+`install_games`, `login`, `logout`, `upload`) print a "not available"
+message that points to the local alternative where there is one.
 
 Passing a cart on the command line boots straight into that cart.
 

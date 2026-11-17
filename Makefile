@@ -73,6 +73,9 @@ endif
 
 CXXFLAGS ?= -O2 -Wall -Wextra -std=gnu++17
 CXXFLAGS += $(SDL_CFLAGS)
+# -MMD -MP writes a .d file next to every object, listing the headers it
+# used.  Without it make cannot know that a changed header needs a rebuild.
+CXXFLAGS += -MMD -MP
 LIBS     += $(SDL_LIBS) -lm
 
 # ------------------------------------------------------------------ layout --
@@ -87,7 +90,10 @@ TARGET         := $(BUILD_DIR)/pico-c$(EXE_SUFFIX)
 ASAN_TARGET    := $(BUILD_DIR)/pico-c-asan$(EXE_SUFFIX)
 TEST_CART      := $(ROOT)/tests/carts/test.p8
 
-CPP_SRCS := $(wildcard $(SRC_DIR)/*.cpp)
+# The sources live in src/ itself and in the folders below it (src/api/,
+# src/shell/, ...).  Every .cpp below those folders becomes an object of the
+# same name, so the layout of src/ is mirrored under obj/.
+CPP_SRCS := $(wildcard $(SRC_DIR)/*.cpp) $(wildcard $(SRC_DIR)/*/*.cpp)
 CPP_OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(CPP_SRCS))
 
 Z8LUA_NAMES := lapi lcode lctype ldebug ldo ldump \
@@ -108,11 +114,19 @@ help:
 $(OBJ_DIR) $(Z8LUA_OBJ_DIR) $(BUILD_DIR):
 	mkdir -p $@
 
+# Every source becomes an object of the same name; the folder layout of src/
+# is mirrored under obj/, so src/api/api_gfx.cpp becomes obj/api/api_gfx.o.
+#
 # The pico-c sources include lua.h, so the z8lua checkout has to exist before
 # they are compiled.  Depending on the stamp guarantees that, even on a tree
 # where z8lua has never been cloned.
+#
+# The recipe creates the folder of the object itself.  A second pattern rule
+# for src/api/ would be ambiguous: make prefers a rule without order-only
+# prerequisites, so the generic rule above would always win.
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp $(Z8LUA_STAMP) | $(OBJ_DIR)
-	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) -I$(Z8LUA_DIR) -c -o $@ $<
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) -I$(SRC_DIR)/api -I$(Z8LUA_DIR) -c -o $@ $<
 
 $(TARGET): $(CPP_OBJS) $(Z8LUA_A)
 	$(CXX) $(CXXFLAGS) -o $@ $(CPP_OBJS) $(Z8LUA_A) $(LIBS) $(LDFLAGS)
@@ -162,3 +176,13 @@ run: $(TARGET)
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+# ----------------------------------------------------------------- includes --
+# The dependency files that -MMD -MP writes next to the objects.  They tell
+# make which header belongs to which object, so that changing a header
+# rebuilds everything that includes it.
+#
+# -MMD -MP가 오브젝트 옆에 만들어 주는 의존성 파일. 어떤 헤더가 어떤 오브젝트의
+# 일부인지 알려 주기 때문에, 헤더를 고치면 그것을 포함하는 것이 모두 다시
+# 컴파일된다.
+-include $(CPP_OBJS:.o=.d) $(Z8LUA_OBJS:.o=.d)

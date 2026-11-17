@@ -1,3 +1,25 @@
+/*
+ * gfx.cpp — the fonts and the drawing of the host.
+ *
+ * This is the part of the emulator that knows how a character looks and
+ * how the screen reaches the host window.  The Lua side of the drawing
+ * (spr, pset, print, ...) lives in src/api/ and writes into the RAM; this
+ * file renders that RAM and puts the glyphs on the screen.
+ *
+ * 에뮬레이터에서 문자가 어떻게 생겼는지, 화면이 어떻게 호스트 창에 닿는지를
+ * 아는 부분이다. 드로잉의 Lua 쪽(spr, pset, print 등)은 src/api/에 있고 RAM에
+ * 쓴다. 이 파일은 그 RAM을 렌더링하고 화면에 글자를 그린다.
+ *
+ * The fonts are the ones of PICO-8 v41: a 3x5 font for the ASCII range, a
+ * set of small glyphs for the control codes and a table of 7x5 bitmaps for
+ * the wide graphics glyphs, the emoji and the Japanese kana.  The wide
+ * glyphs are real bitmaps, not scaled up ones.
+ *
+ * 글꼴은 PICO-8 v41의 것이다. ASCII 범위용 3x5 폰트, 제어 코드용 작은 글자
+ * 모음, 그리고 넓은 그래픽 글자·이모지·일본어 가나/카나용 7x5 비트맵 테이블.
+ * 넓은 글자는 확대된 것이 아니라 진짜 비트맵이다.
+ */
+
 #include <string.h>
 #include "pico8.h"
 
@@ -110,6 +132,24 @@ static const uint8_t pico8_font[96][8] = {
    (tools/gen_font.py). Wide glyphs are real 7x5 bitmaps, not scaled. */
 #include "font_table.inc"
 
+/*
+ * pico8_draw_char(x, y, ch, color) — put one glyph on the screen.
+ *
+ * The glyph comes out of the built-in font and is drawn with a single
+ * colour.  The colour is looked up in the draw palette first, so print()
+ * and the other text functions see the palette the cart has set up.
+ *
+ * The glyph is 4x6 pixels for the ASCII range, 8 pixels wide for the wide
+ * graphics glyphs, and the control codes have their own small table.  Code
+ * 0 is the end of a string and draws nothing.
+ *
+ * 글자를 내장 폰트에서 꺼내 한 색으로 그린다. 색은 먼저 드로우 팔레트에서
+ * 찾으므로 print() 같은 텍스트 함수가 카트가 설정한 팔레트를 그대로 본다.
+ *
+ * 글자는 ASCII 범위에서 4x6 픽셀이고, 넓은 그래픽 글자는 8픽셀 너비이며,
+ * 제어 코드에는 별도의 작은 테이블이 있다. 코드 0은 문자열의 끝이라 아무것도
+ * 그리지 않는다.
+ */
 void pico8_draw_char(int x, int y, uint8_t ch, uint8_t color)
 {
     if (x >= PICO8_SCREEN_W || y >= PICO8_SCREEN_H) return;
@@ -152,17 +192,31 @@ void pico8_draw_char(int x, int y, uint8_t ch, uint8_t color)
 }
 
 /*
-** One p8scii text cell, as print() draws it. Altogether the modes measured on
-** the oracle:
-**   - background colours fill a cell one pixel bigger than the glyph on the
-**     top/left and the right/bottom, i.e. (advance+1) by (6 glyph rows + 1);
-**   - \^w doubles the cell horizontally, \^t vertically (both for \^p);
-**   - in inverted mode the cell is filled with the foreground colour and the
-**     glyph itself is drawn in the background colour -- or left untouched
-**     when no background colour is set;
-**   - pinball mode spreads the glyph over a double-width/tall cell but keeps
-**     single pixels, offset by one pixel to the right.
-*/
+ * pico8_draw_char_text(x, y, ch, fg, has_bg, bg, invert, wide, tall, pinball)
+ * — put one glyph on the screen the way print() does.
+ *
+ * The modes were measured on the oracle:
+ *
+ *   - a background colour fills a cell one pixel bigger than the glyph on
+ *     the top/left and the right/bottom, that is (advance+1) by (6 glyph
+ *     rows + 1);
+ *   - \^w doubles the cell horizontally and \^t vertically (both for \^p);
+ *   - in inverted mode the cell is filled with the foreground colour and
+ *     the glyph itself is drawn in the background colour, or left untouched
+ *     when no background colour is set;
+ *   - the pinball mode spreads the glyph over a double width and height
+ *     cell but keeps the single pixels, offset by one pixel to the right.
+ *
+ * 오라클에서 측정한 모드들:
+ *
+ *   - 배경색은 글자보다 위/왼쪽과 오른쪽/아래로 한 픽셀 더 큰 칸을 채운다.
+ *     즉 (advance+1) x (글자 6행 + 1) 크기다.
+ *   - \^w는 칸을 가로로, \^t는 세로로 두 배로 만든다(\^p도 둘 다 한다).
+ *   - 반전 모드에서는 칸을 전경색으로 채우고 글자 자체를 배경색으로 그린다.
+ *     배경색이 없으면 화면이 그대로 비쳐 보인다.
+ *   - 핀볼 모드는 글자를 두 배 크기의 칸에 퍼뜨리되 픽셀은 하나씩만 쓰고,
+ *     오른쪽으로 한 픽셀 밀어 놓는다.
+ */
 void pico8_draw_char_text(int x, int y, uint8_t ch,
                           uint8_t fg, int has_bg, uint8_t bg,
                           int invert, int wide, int tall, int pinball)
@@ -244,11 +298,15 @@ void pico8_draw_char_text(int x, int y, uint8_t ch,
     }
 }
 
-void pico8_blit_char(uint8_t ch, int x, int y, uint8_t color)
-{
-    pico8_draw_char(x, y, ch, color);
-}
-
+/*
+ * pico8_put_pixel(x, y, color) — put one pixel on the screen.
+ *
+ * Writes into the screen RAM directly.  A pixel outside the screen is
+ * thrown away, so the callers do not have to check the bounds themselves.
+ *
+ * 화면 RAM에 직접 쓴다. 화면 밖의 픽셀은 버려지므로, 호출하는 쪽이 범위를
+ * 따로 검사할 필요가 없다.
+ */
 void pico8_put_pixel(int x, int y, uint8_t color)
 {
     if (x < 0 || x >= PICO8_SCREEN_W || y < 0 || y >= PICO8_SCREEN_H) return;
@@ -257,6 +315,16 @@ void pico8_put_pixel(int x, int y, uint8_t color)
     else       pico8_ram[addr] = (pico8_ram[addr] & 0xf0) | (uint8_t)(color & 0x0f);
 }
 
+/*
+ * pico8_clear_screen(color) — fill the whole screen with one colour.
+ *
+ * The screen is a 4 bit plane, so one byte holds two pixels; the colour
+ * is put into both nibbles and the whole 8KB of the screen is filled with
+ * memset().
+ *
+ * 화면은 4비트 평면이라 한 바이트에 픽셀 두 개가 들어간다. 색을 두 니블
+ * 모두에 넣고 화면 전체 8KB를 memset()으로 채운다.
+ */
 void pico8_clear_screen(uint8_t color)
 {
     uint8_t nib = (uint8_t)(color & 0x0f);
@@ -264,6 +332,15 @@ void pico8_clear_screen(uint8_t color)
     memset(&pico8_ram[PICO8_SCREEN], byte, 0x2000);
 }
 
+/*
+ * pico8_draw_char_scaled(x, y, ch, color, scale) — a big glyph.
+ *
+ * Draws the glyph of the ASCII range, enlarged by an integer factor.  This
+ * is what the boot splash and the shell use for their headings.
+ *
+ * ASCII 범위의 글자를 정수 배로 확대해서 그린다. 부팅 화면과 셸의 제목에
+ * 쓰인다.
+ */
 void pico8_draw_char_scaled(int x, int y, uint8_t ch, uint8_t color, int scale)
 {
     if (scale < 1) scale = 1;
@@ -280,6 +357,17 @@ void pico8_draw_char_scaled(int x, int y, uint8_t ch, uint8_t color, int scale)
     }
 }
 
+/*
+ * pico8_render_screen(pixels, pitch, scale) — the screen as the host sees it.
+ *
+ * Reads the screen RAM, looks every pixel up in the screen palette and
+ * writes the result into the buffer of the host.  A PICO-8 pixel covers
+ * scale x scale host pixels.
+ *
+ * pixels  목적지 버퍼. 픽셀당 32비트, 0x00RRGGBB 형식
+ * pitch   목적지에서 한 줄 내려갈 때의 바이트 간격
+ * scale   PICO-8 픽셀 하나가 차지할 호스트 픽셀 수
+ */
 void pico8_render_screen(uint32_t *pixels, int pitch, int scale_w)
 {
     int screen_pitch = pitch / (int)sizeof(uint32_t);

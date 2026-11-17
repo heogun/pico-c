@@ -1,0 +1,75 @@
+# CLAUDE.md — pico-c
+
+PICO-8(0.2.7) 호환 에뮬레이터. C++17 + SDL2, Lua 런타임은 z8lua(pico8 브랜치,
+`lua_Number` = `z8::fix32`). 목표는 **실제 PICO-8과 바이트 단위로 같은 동작**이며,
+모든 판단 기준은 오라클(실제 PICO-8) 실측이다.
+
+- 진행 상황 / 로드맵 / 실측 규칙: [progress.md](progress.md) — 새 작업 전에 먼저 읽을 것
+- API 구현 현황: [API_CHECKLIST.md](API_CHECKLIST.md)
+- 테스트 스위트 설명: [tests/README.md](tests/README.md), 플랫폼: [platforms/README.md](platforms/README.md)
+
+## 빌드 / 테스트
+
+```sh
+make PLATFORM=macos                      # → build/macos/pico-c (Makefile이 codesign까지 함)
+./build/macos/pico-c tests/carts/test.p8
+platforms/macos/test.sh                  # 골든 트랜스크립트 회귀 (PICO-8 불필요)
+platforms/macos/test.sh cmp_all.p8       # 카트 하나만
+platforms/macos/oracle.sh                # 실제 PICO-8과 직접 비교
+platforms/macos/oracle.sh --record       # tests/expected/ 갱신 (오라클 출력으로)
+make asan                                # AddressSanitizer 빌드
+```
+
+- 첫 빌드 시 `make`가 z8lua를 `platforms/common/deps/z8lua`로 git clone (네트워크 필요).
+- macOS SDL2는 MacPorts(`/opt/local`). amfid 문제로 **ad-hoc codesign 없이는 실행 불가** —
+  Makefile이 자동 처리하지만 수동으로 바이너리를 만들면 `codesign --force --sign -` 필요.
+- 산출물은 전부 `build/<platform>/` (gitignore).
+
+## 오라클(실제 PICO-8) 사용 시 주의
+
+- `/Applications/PICO-8.app`는 멈춤 → 반드시 사본 사용:
+  `cp -R /Applications/PICO-8.app /tmp/p8app && codesign --force --deep --sign - /tmp/p8app`
+  (`oracle.sh`가 이 사본을 씀)
+- 오라클은 `-x` 헤드리스 실행. 이 모드에서 `save()`는 조용히 무시되고 `info()`는 아무것도 안 찍는다.
+- 오라클의 상대 경로 기준은 `~/Library/Application Support/pico-8/carts/`.
+- 의도적 차이는 `tests/expected/divergences.txt`(KNOWN), 시계 같은 가변 필드는 `tests/expected/masks.txt`.
+
+## 소스 구조
+
+| 경로 | 내용 |
+|------|------|
+| `src/pico8.h` | 우산 헤더 — `pico8_{core,gfx,input,audio,cart,console,vm,charset}.h`를 포함 |
+| `src/api/` | Lua API. 서브시스템별 모듈(`api_gfx/text/memory/input/audio/system/cart/lua.cpp`)이 각자 등록, `api_registry.cpp`가 등록 함수 호출. 모듈 간 공유는 `api_internal.h` |
+| `src/cart/` | 카트 I/O: `cart_read`(.p8/.p8.png 로드, `#include`, 소스 제한 검사), `cart_write`(.p8), `cart_png`(.p8.png 인코더), `cart_compress`(`:c:`/PXA 해제), `cart_data`, `cart_state`. 내부 헤더 `cart_internal.h` |
+| `src/shell/` | 부트 스플래시·콘솔(`console`), 명령 표(`commands.cpp`의 `kShellCommands`), 호스트 파일/폴더(`host`), 키 입력(`input`). 내부 헤더 `shell_internal.h` |
+| `src/vm.cpp` | Lua VM, 콜백 호출, 에러 블록 출력, `pico8_apply_parity()`(전역 API 패리티) |
+| `src/audio.cpp` | 신디사이저 + 뮤직 시퀀서 |
+| `src/gfx.cpp` `src/input.cpp` `src/memory.cpp` | 화면/입력/RAM의 호스트 측 |
+| `src/charset.cpp` + `charset_table.inc` | charset 바이트 ↔ UTF-8 (생성기 `tools/gen_charset.py`) |
+| `src/font_table.inc` | 256글리프 비트맵 (생성기 `tools/gen_font.py`, 입력 `tools/font_dump.txt`) |
+| `src/pxa.cpp` | 공식 PXA 압축기 이식 |
+| `src/tokens.cpp` | 8192 토큰 카운터 (파서와 독립된 렉서) |
+| `src/util.{h,cpp}` | 공용 문자열/경로/16진수 헬퍼 |
+| `src/main.cpp` | 호스트 루프: 창, 이벤트, 프레임 타이밍 |
+
+Makefile은 `src/*.cpp`와 `src/*/*.cpp`를 와일드카드로 잡으므로 **새 파일 추가 시 Makefile 수정 불필요**
+(단, 하위 폴더는 한 단계까지만).
+
+## 코드 규약
+
+- **모든 함수와 파일 상단에 영어 + 한국어 doc 주석**을 단다 (기존 스타일 그대로: 영어 문단 뒤 한국어 문단).
+- 서브시스템 경계를 지킨다: Lua 바인딩은 `src/api/<모듈>`, 카트 포맷은 `src/cart/`, 셸은 `src/shell/`.
+  폴더 내부 공유는 `*_internal.h`, 외부 공개는 `src/pico8_*.h`.
+- 공용 헬퍼가 필요하면 복사하지 말고 `src/util.h`에 둔다.
+- 텍스트는 내부적으로 **PICO-8 charset 바이트**로 다루고, 출력/저장 경계에서만 UTF-8로 변환한다
+  (`pico8_charset_from_utf8` / `pico8_charset_to_utf8`).
+- 셸 명령 추가는 `src/shell/commands.cpp`의 `kShellCommands` 표에 한 줄 추가.
+- 동작을 바꿀 때는 먼저 오라클로 실측 → 회귀 카트(`tests/carts/cmp_<주제>.p8`) 추가 →
+  `oracle.sh --record`로 골든 기록 → 구현. 실측 규칙은 progress.md에 남긴다.
+- 커밋 메시지: `feat:` / `fix:` / `refactor:` / `docs:` 접두어, 영어 본문 + 한국어 한 줄 요약.
+
+## 건드리지 말 것
+
+- `src/stb_image.h`(서드파티), `*.inc`(생성물 — 생성기를 고쳐서 다시 만들 것).
+- `test_carts/`(저작권 카트), `picotestdriver/`(별도 저장소) — gitignore 대상, 커밋 금지.
+- progress.md §4 "이미 잘 동작하는 것들"은 오라클과 일치가 검증된 부분이니 재구현하지 말 것.
