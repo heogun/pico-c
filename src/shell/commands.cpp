@@ -328,7 +328,13 @@ void shell_open_in_file_manager(const std::string &dir)
 #else
     std::string cmd = "xdg-open \"" + dir + "\" >/dev/null 2>&1 &";
 #endif
-    system(cmd.c_str());
+    /* Opening the folder is best effort; there is nothing to report on
+       failure.  glibc marks system() warn_unused_result, which a (void)
+       cast does not silence, hence the variable.
+       폴더 열기는 시도만 하며 실패해도 알릴 것이 없다. glibc의 system()은
+       warn_unused_result라 (void) 캐스트로는 경고가 사라지지 않아 변수에 받는다. */
+    int rc = system(cmd.c_str());
+    (void)rc;
 }
 
 /*

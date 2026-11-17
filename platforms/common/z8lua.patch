@@ -98,6 +98,19 @@ index 3bb71703..e011c34f 100644
        case '0': case '1': case '2': case '3': case '4':
        case '5': case '6': case '7': case '8': case '9': {
          read_numeral(ls, seminfo);
+diff --git a/lobject.c b/lobject.c
+index b9020867..5e2f29d4 100644
+--- a/lobject.c
++++ b/lobject.c
+@@ -261,7 +261,7 @@ const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
+       }
+       case 'p': {
+         char buff[4*sizeof(void *) + 8]; /* should be enough space for a `0x%llx' */
+-        int l = sprintf(buff, "0x%llx", (long long int)(intptr_t)va_arg(argp, void *));
++        int l = snprintf(buff, sizeof(buff), "0x%llx", (long long int)(intptr_t)va_arg(argp, void *));
+         pushstr(L, buff, l);
+         break;
+       }
 diff --git a/lparser.c b/lparser.c
 index b119947c..53534960 100644
 --- a/lparser.c
@@ -176,7 +189,7 @@ index b119947c..53534960 100644
    luaK_patchtohere(fs, escapelist);  /* patch escape list to 'if' end */
  }
 diff --git a/lpico8lib.c b/lpico8lib.c
-index 7d4daaf0..462faec2 100644
+index 7d4daaf0..867546f9 100644
 --- a/lpico8lib.c
 +++ b/lpico8lib.c
 @@ -12,6 +12,7 @@
@@ -215,6 +228,32 @@ index 7d4daaf0..462faec2 100644
      return 1;
  }
  
+@@ -191,13 +190,13 @@ static int pico8_tostr(lua_State *l) {
+             if (flags) {
+                 uint32_t b = (uint32_t)x.bits();
+                 if ((flags & 0x3) == 0x3) {
+-                    sprintf(buffer, "0x%04x%04x", (b >> 16) & 0xffff, b & 0xffff);
++                    snprintf(buffer, sizeof(buffer), "0x%04x%04x", (b >> 16) & 0xffff, b & 0xffff);
+                 }
+                 else if ((flags & 0x2) == 0x2) {
+-                    sprintf(buffer, "%d", b);
++                    snprintf(buffer, sizeof(buffer), "%d", b);
+                 }
+                 else {
+-                    sprintf(buffer, "0x%04x.%04x", (b >> 16) & 0xffff, b & 0xffff);
++                    snprintf(buffer, sizeof(buffer), "0x%04x.%04x", (b >> 16) & 0xffff, b & 0xffff);
+                 }
+             } else {
+                 lua_number2str(buffer, x);
+@@ -224,7 +223,7 @@ static int pico8_tostr(lua_State *l) {
+                 return 1;
+             }
+             [[fallthrough]];
+-        default: sprintf(buffer, "[%s]", luaL_typename(l, 1)); break;
++        default: snprintf(buffer, sizeof(buffer), "[%s]", luaL_typename(l, 1)); break;
+     }
+     lua_pushstring(l, s);
+     return 1;
 @@ -272,7 +271,7 @@ static int pico8_chr(lua_State *l) {
      size_t numargs = lua_gettop(l);
      if (numargs > sizeof(s)) numargs = sizeof(s);
@@ -234,7 +273,7 @@ index 7d4daaf0..462faec2 100644
      lua_checkstack(l, count);
      for (int i = 0; i < count; ++i)
 diff --git a/lstrlib.c b/lstrlib.c
-index fcc61c9a..51241147 100644
+index fcc61c9a..7ef26361 100644
 --- a/lstrlib.c
 +++ b/lstrlib.c
 @@ -134,7 +134,7 @@ static int str_byte (lua_State *L) {
@@ -313,6 +352,63 @@ index fcc61c9a..51241147 100644
    return 2;
  }
  
+@@ -842,9 +842,9 @@ static void addquoted (lua_State *L, luaL_Buffer *b, int arg) {
+     else if (*s == '\0' || iscntrl(uchar(*s))) {
+       char buff[10];
+       if (!isdigit(uchar(*(s+1))))
+-        sprintf(buff, "\\%d", (int)uchar(*s));
++        snprintf(buff, sizeof(buff), "\\%d", (int)uchar(*s));
+       else
+-        sprintf(buff, "\\%03d", (int)uchar(*s));
++        snprintf(buff, sizeof(buff), "\\%03d", (int)uchar(*s));
+       luaL_addstring(b, buff);
+     }
+     else
+@@ -911,7 +911,7 @@ static int str_format (lua_State *L) {
+       strfrmt = scanformat(L, strfrmt, form);
+       switch (*strfrmt++) {
+         case 'c': {
+-          nb = sprintf(buff, form, luaL_checkint(L, arg));
++          nb = snprintf(buff, MAX_ITEM, form, luaL_checkint(L, arg));
+           break;
+         }
+         case 'd': case 'i': {
+@@ -921,7 +921,7 @@ static int str_format (lua_State *L) {
+           luaL_argcheck(L, -1 < diff && diff < 1, arg,
+                         "not a number in proper range");
+           addlenmod(form, LUA_INTFRMLEN);
+-          nb = sprintf(buff, form, ni);
++          nb = snprintf(buff, MAX_ITEM, form, ni);
+           break;
+         }
+         case 'o': case 'u': case 'x': case 'X': {
+@@ -931,7 +931,7 @@ static int str_format (lua_State *L) {
+           luaL_argcheck(L, -1 < diff && diff < 1, arg,
+                         "not a non-negative number in proper range");
+           addlenmod(form, LUA_INTFRMLEN);
+-          nb = sprintf(buff, form, ni);
++          nb = snprintf(buff, MAX_ITEM, form, ni);
+           break;
+         }
+         case 'e': case 'E': case 'f':
+@@ -940,7 +940,7 @@ static int str_format (lua_State *L) {
+ #endif
+         case 'g': case 'G': {
+           addlenmod(form, LUA_FLTFRMLEN);
+-          nb = sprintf(buff, form, (LUA_FLTFRM_T)luaL_checknumber(L, arg));
++          nb = snprintf(buff, MAX_ITEM, form, (LUA_FLTFRM_T)luaL_checknumber(L, arg));
+           break;
+         }
+         case 'q': {
+@@ -957,7 +957,7 @@ static int str_format (lua_State *L) {
+             break;
+           }
+           else {
+-            nb = sprintf(buff, form, s);
++            nb = snprintf(buff, MAX_ITEM, form, s);
+             lua_pop(L, 1);  /* remove result from 'luaL_tolstring' */
+             break;
+           }
 diff --git a/ltable.c b/ltable.c
 index 4532cc80..cd07a47e 100644
 --- a/ltable.c
@@ -402,6 +498,19 @@ index 4532cc80..cd07a47e 100644
      default: {
        Node *n = mainposition(t, key);
        do {  /* check whether `key' is somewhere in the chain */
+diff --git a/luaconf.h b/luaconf.h
+index 9d404b00..08120a44 100644
+--- a/luaconf.h
++++ b/luaconf.h
+@@ -590,7 +590,7 @@
+ #define luai_numpeek4(L,a)	(luaV_peek(L,a,4))
+ 
+ #define lua_number2str(s,n) [&]() { \
+-  int i = sprintf(s, "%1.4f", (double)n); \
++  int i = snprintf(s, sizeof(s), "%1.4f", (double)n); /* s: a char array */ \
+   while (i > 0 && s[i - 1] == '0') s[--i] = '\0'; \
+   if (i > 0 && s[i - 1] == '.') s[--i] = '\0'; \
+   return i; }()
 diff --git a/lvm.c b/lvm.c
 index b6a1bae5..d23c3f37 100644
 --- a/lvm.c
