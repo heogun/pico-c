@@ -106,9 +106,10 @@ static int fillp_color(int x, int y, uint32_t colraw, uint8_t *out)
     return 1;
 }
 
-/* The secondary palette (pal(_,_,2)) is not memory-mapped in PICO-8, so it is
-   kept in a private buffer rather than pico8_ram. */
-static uint8_t g_secondary_pal[16] = {0};
+/* The secondary palette (pal(_,_,2)) lives in the RAM at 0x5f60..0x5f6f
+   (measured: peek(0x5f63) shows what pal(3, v, 2) stored).
+   세컨더리 팔레트(pal(_,_,2))는 RAM 0x5f60..0x5f6f에 있다(실측). */
+#define SECONDARY_PAL 0x5f60
 
 /*
  * sprite_fillp(px, py, mc, out) — the colour of one sprite pixel.
@@ -125,7 +126,7 @@ static uint8_t g_secondary_pal[16] = {0};
 static int sprite_fillp(int px, int py, uint8_t mc, uint8_t *out)
 {
     if (!(pico8_ram[0x5f33] & 2)) { *out = mc; return 1; }
-    uint8_t sec = g_secondary_pal[mc & 0x0f];
+    uint8_t sec = pico8_ram[SECONDARY_PAL + (mc & 0x0f)];
     uint8_t c;
     if (!fillp_pick(px, py, (uint8_t)((sec >> 4) & 0x0f), (uint8_t)(sec & 0x0f), &c))
         return 0;
@@ -329,6 +330,24 @@ static void draw_sprite(uint8_t n, int x, int y, uint8_t w, uint8_t h, int flip_
 }
 
 /*
+ * api_pen(L, index) — the colour argument of a drawing function.
+ *
+ * Reads it and makes it the current draw colour (0x5f25), the whole byte,
+ * as PICO-8 does for every primitive that is given a colour (measured:
+ * rect(..., 0x18) leaves 24 there; cls() and pget() do not touch it).
+ *
+ * 그리기 함수의 색 인자를 읽어 현재 드로우 색(0x5f25)으로 삼는다. 바이트
+ * 전체를. PICO-8은 색을 받은 모든 도형에서 그렇게 한다(실측: rect(..., 0x18)는
+ * 24를 남기고, cls()와 pget()은 건드리지 않는다).
+ */
+static int api_pen(lua_State *L, int index)
+{
+    int c = fix32_to_int(luaL_checkinteger(L, index));
+    pico8_ram[0x5f25] = (uint8_t)c;
+    return c;
+}
+
+/*
  * cls(color) — clear the screen.
  *
  * Fills the whole screen with one colour and puts the text cursor back to
@@ -506,7 +525,7 @@ static int pico8_pset(lua_State *L)
     int y = fix32_to_int(luaL_checknumber(L, 2));
     api_apply_camera(&x, &y);
     if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
-        int c = fix32_to_int(luaL_checkinteger(L, 3));
+        int c = api_pen(L, 3);
         pset(x, y, &c);
     } else pset(x, y, NULL);
     return 0;
@@ -579,15 +598,47 @@ static int pico8_sset(lua_State *L)
  */
 static int pico8_line(lua_State *L)
 {
-    int x0 = fix32_to_int(luaL_checknumber(L, 1));
-    int y0 = fix32_to_int(luaL_checknumber(L, 2));
-    int x1 = fix32_to_int(luaL_checknumber(L, 3));
-    int y1 = fix32_to_int(luaL_checknumber(L, 4));
+    /* PICO-8 keeps the end of the last line at 0x5f3c / 0x5f3e (16 bit x
+       and y, before the camera) and 0x5f35 = 1 when there is none; at boot
+       the end is (0,0) and valid (measured).
+       PICO-8은 마지막 선의 끝을 0x5f3c / 0x5f3e(16비트 x, y, 카메라 적용 전)에
+       두고, 없으면 0x5f35 = 1이다. 부팅 시 끝점은 (0,0)이고 유효하다(실측). */
+    int n = lua_gettop(L);
+    if (n == 0) {                       /* line(): forget the last end */
+        pico8_ram[0x5f35] = 1;
+        return 0;
+    }
+
+    int x0, y0, x1, y1, cv, *c = NULL;
+    if (n >= 4) {                       /* line(x0, y0, x1, y1, [col]) */
+        x0 = fix32_to_int(luaL_checknumber(L, 1));
+        y0 = fix32_to_int(luaL_checknumber(L, 2));
+        x1 = fix32_to_int(luaL_checknumber(L, 3));
+        y1 = fix32_to_int(luaL_checknumber(L, 4));
+        if (n >= 5) { cv = api_pen(L, 5); c = &cv; }
+    } else {                            /* line(x1, y1, [col]): go on */
+        x1 = fix32_to_int(luaL_checknumber(L, 1));
+        y1 = fix32_to_int(luaL_optnumber(L, 2, fix32_from_int(0)));
+        if (n >= 3) { cv = api_pen(L, 3); c = &cv; }
+        x0 = (int16_t)(pico8_ram[0x5f3c] | (pico8_ram[0x5f3d] << 8));
+        y0 = (int16_t)(pico8_ram[0x5f3e] | (pico8_ram[0x5f3f] << 8));
+        if (pico8_ram[0x5f35]) {        /* no last end: only start here */
+            x0 = x1;
+            y0 = y1;
+            c = NULL;
+        }
+    }
+
+    bool draw = !(n < 4 && pico8_ram[0x5f35]);
+    pico8_ram[0x5f35] = 0;
+    pico8_ram[0x5f3c] = (uint8_t)(x1 & 0xff);
+    pico8_ram[0x5f3d] = (uint8_t)((x1 >> 8) & 0xff);
+    pico8_ram[0x5f3e] = (uint8_t)(y1 & 0xff);
+    pico8_ram[0x5f3f] = (uint8_t)((y1 >> 8) & 0xff);
+    if (!draw) return 0;
+
     api_apply_camera(&x0, &y0); api_apply_camera(&x1, &y1);
-    if (lua_gettop(L) >= 5) {
-        int c = fix32_to_int(luaL_checkinteger(L, 5));
-        draw_line(x0, y0, x1, y1, &c);
-    } else draw_line(x0, y0, x1, y1, NULL);
+    draw_line(x0, y0, x1, y1, c);
     return 0;
 }
 
@@ -607,7 +658,7 @@ static int pico8_rect(lua_State *L)
     api_apply_camera(&x0, &y0); api_apply_camera(&x1, &y1);
     int *c = NULL;
     int cv;
-    if (lua_gettop(L) >= 5) { cv = fix32_to_int(luaL_checkinteger(L, 5)); c = &cv; }
+    if (lua_gettop(L) >= 5) { cv = api_pen(L, 5); c = &cv; }
     for (int x = x0; x <= x1; x++) { pset(x, y0, c); pset(x, y1, c); }
     for (int y = y0; y <= y1; y++) { pset(x0, y, c); pset(x1, y, c); }
     return 0;
@@ -629,7 +680,7 @@ static int pico8_rectfill(lua_State *L)
     api_apply_camera(&x0, &y0); api_apply_camera(&x1, &y1);
     int *c = NULL;
     int cv;
-    if (lua_gettop(L) >= 5) { cv = fix32_to_int(luaL_checkinteger(L, 5)); c = &cv; }
+    if (lua_gettop(L) >= 5) { cv = api_pen(L, 5); c = &cv; }
     for (int y = y0; y <= y1; y++) hline(x0, x1, y, c);
     return 0;
 }
@@ -648,7 +699,7 @@ static int pico8_circ(lua_State *L)
     api_apply_camera(&cx, &cy);
     int r = fix32_to_int(luaL_optnumber(L, 3, fix32_from_int(4)));
     int *c = NULL, cv;
-    if (lua_gettop(L) >= 4) { cv = fix32_to_int(luaL_checkinteger(L, 4)); c = &cv; }
+    if (lua_gettop(L) >= 4) { cv = api_pen(L, 4); c = &cv; }
     draw_circle(cx, cy, r, c, 0);
     return 0;
 }
@@ -667,7 +718,7 @@ static int pico8_circfill(lua_State *L)
     api_apply_camera(&cx, &cy);
     int r = fix32_to_int(luaL_optnumber(L, 3, fix32_from_int(4)));
     int *c = NULL, cv;
-    if (lua_gettop(L) >= 4) { cv = fix32_to_int(luaL_checkinteger(L, 4)); c = &cv; }
+    if (lua_gettop(L) >= 4) { cv = api_pen(L, 4); c = &cv; }
     draw_circle(cx, cy, r, c, 1);
     return 0;
 }
@@ -691,7 +742,7 @@ static int pico8_oval(lua_State *L)
     int a = abs(x1 - x0) / 2, b = abs(y1 - y0) / 2;
     int xc = (x0 + x1) / 2, yc = (y0 + y1) / 2;
     int *c = NULL, cv;
-    if (lua_gettop(L) >= 5) { cv = fix32_to_int(luaL_checkinteger(L, 5)); c = &cv; }
+    if (lua_gettop(L) >= 5) { cv = api_pen(L, 5); c = &cv; }
     int x = 0, y = b, a2 = a * a, b2 = b * b;
     int sigma = 2 * b2 + a2 * (1 - 2 * b);
     while (b2 * x <= a2 * y) {
@@ -729,7 +780,7 @@ static int pico8_ovalfill(lua_State *L)
     int a = abs(x1 - x0) / 2, b = abs(y1 - y0) / 2;
     int xc = (x0 + x1) / 2, yc = (y0 + y1) / 2;
     int *c = NULL, cv;
-    if (lua_gettop(L) >= 5) { cv = fix32_to_int(luaL_checkinteger(L, 5)); c = &cv; }
+    if (lua_gettop(L) >= 5) { cv = api_pen(L, 5); c = &cv; }
     int x = 0, y = b, a2 = a * a, b2 = b * b;
     int sigma = 2 * b2 + a2 * (1 - 2 * b);
     while (b2 * x <= a2 * y) {
@@ -752,20 +803,35 @@ static int pico8_ovalfill(lua_State *L)
  * pal_base(p) — the memory of one of the three palettes.
  *
  *   0  the draw palette, in the RAM at 0x5f00
- *   1  the draw palette of the screen below, in the RAM at 0x5f10
- *   2  the secondary palette, which PICO-8 does not map into the RAM and
- *      which is therefore kept in a private buffer
+ *   1  the screen palette, in the RAM at 0x5f10
+ *   2  the secondary palette, in the RAM at 0x5f60
  *
  *   0  드로우 팔레트. RAM의 0x5f00
- *   1  아래쪽 화면의 드로우 팔레트. RAM의 0x5f10
- *   2  세컨더리 팔레트. PICO-8은 이것을 RAM에 대응시키지 않으므로 별도의
- *      버퍼에 보관한다
+ *   1  화면 팔레트. RAM의 0x5f10
+ *   2  세컨더리 팔레트. RAM의 0x5f60
  */
 static uint8_t *pal_base(int p)
 {
     if (p == 1) return &pico8_ram[0x5f10];
-    if (p == 2) return g_secondary_pal;
+    if (p == 2) return &pico8_ram[SECONDARY_PAL];
     return &pico8_ram[0x5f00];
+}
+
+/*
+ * pal_store(b, p, c0, c1) — put colour c1 into entry c0 of palette p.
+ *
+ * The draw palette keeps its transparency bit and takes the low four bits;
+ * the screen and the secondary palettes take the whole byte (measured:
+ * pal(3, 0x9c, 1) leaves 156 at 0x5f13, and bit 7 picks a secret colour).
+ *
+ * 드로우 팔레트는 투명 비트를 유지하고 하위 4비트를 받는다. 화면 팔레트와
+ * 세컨더리 팔레트는 바이트 전체를 받는다(실측: pal(3, 0x9c, 1)은 0x5f13에
+ * 156을 남기고, 7번 비트가 숨은 색을 고른다).
+ */
+static void pal_store(uint8_t *b, int p, int c0, int c1)
+{
+    if (p == 0) b[c0] = (uint8_t)((b[c0] & 0xf0) | (c1 & 0x0f));
+    else        b[c0] = (uint8_t)(c1 & 0xff);
 }
 
 /* Default secondary palette: each entry packs a highlight (high nibble) and the
@@ -822,8 +888,7 @@ static int pico8_pal(lua_State *L)
             if (lua_isnumber(L, -2) && lua_isnumber(L, -1)) {
                 int c0 = fix32_to_int(lua_tonumber(L, -2)) % 16;
                 int c1 = fix32_to_int(lua_tonumber(L, -1));
-                if (p == 2) b[c0] = (uint8_t)(c1 & 0xff);
-                else        b[c0] = (uint8_t)((b[c0] & 0xf0) | (c1 & 0x0f));
+                pal_store(b, p, c0, c1);
             }
             lua_pop(L, 1);
         }
@@ -832,8 +897,7 @@ static int pico8_pal(lua_State *L)
         int c1 = lua_isnoneornil(L, 2) ? c0 : fix32_to_int(luaL_checknumber(L, 2));
         int p = fix32_to_int(luaL_optnumber(L, 3, 0));
         uint8_t *b = pal_base(p);
-        if (p == 2) b[c0] = (uint8_t)(c1 & 0xff);
-        else        b[c0] = (uint8_t)((b[c0] & 0xf0) | (c1 & 0x0f));
+        pal_store(b, p, c0, c1);
     }
     return 0;
 }
@@ -1240,7 +1304,7 @@ static int pico8_rrect(lua_State *L)
     int r = fix32_to_int(luaL_checknumber(L, 5));
     api_apply_camera(&x, &y);
     int *c = NULL; int cv;
-    if (lua_gettop(L) >= 6) { cv = fix32_to_int(luaL_checkinteger(L, 6)); c = &cv; }
+    if (lua_gettop(L) >= 6) { cv = api_pen(L, 6); c = &cv; }
     int maxR = (w < h ? w : h) / 2;
     if (r > maxR) r = maxR;
     if (r <= 0) {
@@ -1295,7 +1359,7 @@ static int pico8_rrectfill(lua_State *L)
     int r = fix32_to_int(luaL_checknumber(L, 5));
     api_apply_camera(&x, &y);
     int *c = NULL; int cv;
-    if (lua_gettop(L) >= 6) { cv = fix32_to_int(luaL_checkinteger(L, 6)); c = &cv; }
+    if (lua_gettop(L) >= 6) { cv = api_pen(L, 6); c = &cv; }
     int maxR = (w < h ? w : h) / 2;
     if (r > maxR) r = maxR;
     if (r <= 0) {
@@ -1335,6 +1399,7 @@ static int pico8_rrectfill(lua_State *L)
  */
 static int pico8_flip(lua_State *L)
 {
+    (void)L;
     /* In PICO-8, flip() flips the draw buffer, syncs to frame, and processes input.
        In headless mode or normal mode with our frame-driven loop, this is a no-op. */
     return 0;

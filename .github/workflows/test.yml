@@ -1,0 +1,40 @@
+# Build pico-c from a fresh checkout and run the regression suite.
+#
+# The suite does not need PICO-8: the golden transcripts and the audio
+# expectations in tests/ were recorded from it.  make clones z8lua at the
+# pinned revision and applies platforms/common/z8lua.patch, so this also
+# checks that a fresh clone builds.
+#
+# 새 체크아웃에서 pico-c를 빌드하고 회귀 스위트를 돌린다. 스위트는 PICO-8이
+# 필요 없다(tests/의 골든과 오디오 기대값이 PICO-8에서 기록됐다). make가 z8lua를
+# 고정 리비전으로 클론하고 패치를 적용하므로, 새 클론이 빌드되는지도 확인한다.
+
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: Build
+        run: platforms/linux/build.sh
+      - name: Test
+        run: platforms/linux/test.sh
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: brew install sdl2
+      - name: Build
+        run: SDL2_DIR="$(brew --prefix sdl2)" platforms/macos/build.sh
+      - name: Test
+        run: platforms/macos/test.sh

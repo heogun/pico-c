@@ -46,14 +46,16 @@ static int pico8_time(lua_State *L)
  * (open the folder of the cart in the file browser), "go_back", and the
  * captures: "screen" (a 384x384 screenshot), "audio_rec" / "audio_end" (a
  * recording of the sound) and "set_filename" (their name, see
- * pico8_console_capture_path()).  "label", "rec" and "video" are not
- * supported.
+ * pico8_console_capture_path()), "label" (the screen becomes the label of
+ * the cart, written by the next save), "rec" and "video" (a gif of the
+ * frames since "rec", or of the last 8 seconds, see src/video.cpp).
  *
  * 여기서 의미를 갖는 명령은 "reset"(카트 재시작), "shutdown"(에뮬레이터 종료),
  * "pause"(셸 열기), "folder"(카트 폴더를 파일 브라우저로 열기), "go_back", 그리고
  * 캡처: "screen"(384x384 스크린샷), "audio_rec" / "audio_end"(소리 녹음),
- * "set_filename"(그 이름, pico8_console_capture_path() 참고)이다. "label",
- * "rec", "video"는 지원하지 않는다.
+ * "set_filename"(그 이름, pico8_console_capture_path() 참고), "label"(화면이
+ * 카트 라벨이 되고 다음 저장 때 쓰인다), "rec"과 "video"("rec" 뒤, 없으면
+ * 최근 8초 프레임의 gif, src/video.cpp 참고)이다.
  */
 static int pico8_extcmd(lua_State *L)
 {
@@ -88,9 +90,13 @@ static int pico8_extcmd(lua_State *L)
         pico8_audio_record_start();
     } else if (strcmp(cmd, "audio_end") == 0) {
         pico8_audio_record_save(pico8_console_capture_path(".wav"));
+    } else if (strcmp(cmd, "label") == 0) {
+        pico8_cart_capture_label();
+    } else if (strcmp(cmd, "rec") == 0) {
+        pico8_video_start();
+    } else if (strcmp(cmd, "video") == 0) {
+        pico8_video_save(pico8_console_capture_path(".gif"));
     }
-    /* "label" (the label of the cart), "rec" and "video" (gif recording)
-       are not supported. */
     return 0;
 }
 

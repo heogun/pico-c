@@ -33,11 +33,13 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
       `7` (framerate), `30`/`31` (devkit keyboard), `32`–`39` (devkit mouse),
       `46`–`49` (channel sfx), `50`–`53` (channel note), `54`–`57` (music),
       `80`–`85` (UTC), `90`–`95` (local), `100` (breadcrumb label)
-- [~] `extcmd(cmd_str, p1, p2)` (`reset`, `shutdown`, `pause` (falls back to the
+- [x] `extcmd(cmd_str, p1, p2)` (`reset`, `shutdown`, `pause` (falls back to the
       shell), `folder`, `go_back`, `screen` (384x384 png, pixel-identical to
-      PICO-8), `audio_rec`/`audio_end` (22050Hz wav) and `set_filename` (exact
-      name, overwritten; otherwise `<cart>_N`) are handled, in
-      `$PICO_C_DESKTOP` or ~/Desktop; `label`, `rec` and `video` (gif) are not)
+      PICO-8), `audio_rec`/`audio_end` (22050Hz wav), `set_filename` (exact
+      name, overwritten; otherwise `<cart>_N`), `label` (the screen becomes
+      the `__label__` written by the next save) and `rec`/`video` (an animated
+      gif at 3x of the frames since `rec`, or the last 8 seconds); captures go
+      to `$PICO_C_DESKTOP` or ~/Desktop)
 - [x] `menuitem(index, [label], [callback])` (1..5 with button mask in bits
       0xff00; items are stored and can be listed/invoked from the shell's
       `menu` command, since pico-c has no modal pause menu)
@@ -53,14 +55,20 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] `circ`, `circfill`, `oval`, `ovalfill`
 - [x] `line`, `rect`, `rectfill`
 - [x] `rrect`, `rrectfill`
-- [x] `pal(c0, c1, p)` / `pal(tbl, p)` (draw + screen + secondary tables, reset forms)
+- [x] `pal(c0, c1, p)` / `pal(tbl, p)` (draw + screen + secondary tables, reset forms);
+      the screen (0x5f10) and secondary (0x5f60) palettes keep the whole byte,
+      and bit 7 of a screen entry shows the secret colours 128..143
+- [x] a colour given to any primitive becomes the draw colour (0x5f25)
+- [x] `line(x1,y1,[col])` goes on from the last end (0x5f3c/0x5f3e), `line()` forgets it
 - [x] `palt(c, t)`
 - [x] `spr`, `sspr`
 - [x] `fillp(p)` (primitive + sprite fill, transparency/apply-to-sprites flags)
 
 ## Table Functions
-- [x] `add`, `del`, `deli`, `count`
-- [x] `all`, `foreach`, `pairs`
+- [x] `add` (returns the value, insert at a position), `del` (first match only,
+      returns it), `deli`, `count` (any value); nil tables give no value
+- [x] `all`, `foreach` (PICO-8's walk: deleting the current element does not
+      skip the next, added elements are visited), `pairs`
 
 ## Input
 - [x] `btn(b, pl)` (reads the RAM mirror at 0x5f4c, so POKE works)
@@ -113,8 +121,9 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
       any-flag match, background fill, sprite fill)
 
 ## Memory
-- [x] `peek`, `poke`, `peek2`, `poke2`, `peek4`, `poke4`
-- [x] `memcpy`, `memset`
+- [x] `peek`, `poke`, `peek2`, `poke2`, `peek4`, `poke4` (addresses wrap at 64KB;
+      peek4/poke4 move the raw 16.16 bits)
+- [x] `memcpy`, `memset` (wrap at 64KB)
 - [x] `reload(dest, source, len, filename)` (copies the cart's on-disk data area
       0x0000..0x42ff into RAM; an optional `filename` reads another cart)
 - [x] `cstore(dest, source, len, filename)` (copies RAM into the cart's data area
@@ -187,5 +196,5 @@ Legend: `[x]` implemented, `[~]` partial/stub, `[ ]` missing.
 - [x] non-command input is evaluated as Lua (`?expr` = `print(expr)`), incl. statement-first semantics
 - [x] `export foo%d.wav` (every SFX to its own file) / `export foo.wav` (SFX 0), also as the Lua function `export()`
 - [~] `edit` opens the cart in `$EDITOR` and reloads it; there is no built-in editor
-- [x] `export foo.png` (the spritesheet, 128x128, pixel-identical to PICO-8) / `import foo.png` (into the spritesheet, nearest palette colour — the mapping is not oracle-checked)
+- [x] `export foo.png` (the spritesheet, 128x128, pixel-identical to PICO-8) / `import foo.png` (into the spritesheet of the RAM and the cart ROM, nearest palette colour — same result as PICO-8 for a gradient, `cmp_import.p8`)
 - [ ] `splore`, `keyconfig`, `install_demos`/`install_games`, `export` of html/bin, `login`/`logout`/`upload` — recognised, print honest "not available" messages

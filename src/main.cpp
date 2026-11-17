@@ -503,6 +503,7 @@ static void main_loop(void)
                 pico8_update_input(has_update60);
                 pico8_vm_call_update();
                 if (has_draw) pico8_vm_call_draw();
+                pico8_video_frame(has_update60 ? 60 : 30);
                 pico8_input_frame_end();
             }
             pico8_frame_count++;
@@ -530,6 +531,10 @@ static void main_loop(void)
  *   pico-c -headless -frames N <cart.p8>
  *                                 ... for N frames, then print how long the
  *                                 cart took per frame (to stderr)
+ *   pico-c -headless -frames N -autoplay SEED <cart.p8>
+ *                                 ... pressing buttons at random (the same
+ *                                 presses for the same seed), to play a
+ *                                 game past its title screen
  *
  * The headless mode is what the test suite uses: it runs the cart for a
  * limited number of frames and writes what the cart prints to the standard
@@ -542,6 +547,9 @@ static void main_loop(void)
  *   pico-c -headless -frames N <cart.p8>
  *                                 ... N 프레임 동안, 끝나면 프레임당 걸린 시간을
  *                                 표준 오류로 찍는다(벤치마크)
+ *   pico-c -headless -frames N -autoplay SEED <cart.p8>
+ *                                 ... 버튼을 무작위로 누르면서(같은 시드면 같은
+ *                                 입력) 게임을 타이틀 화면 너머까지 진행한다
  *
  * 헤드리스 모드가 테스트 스위트가 쓰는 모드다. 정해진 프레임 수만큼 카트를
  * 돌리고, 카트가 출력한 것을 표준 출력으로 쓴다.
@@ -552,6 +560,8 @@ int main(int argc, char *argv[])
     const char *cmdline_args = NULL;
     int headless = 0;
     int bench_frames = 0;
+    int autoplay = 0;
+    unsigned autoplay_seed = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
@@ -560,6 +570,9 @@ int main(int argc, char *argv[])
             headless = 1;
         } else if (strcmp(argv[i], "-frames") == 0 && i + 1 < argc) {
             bench_frames = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-autoplay") == 0 && i + 1 < argc) {
+            autoplay = 1;
+            autoplay_seed = (unsigned)strtoul(argv[++i], NULL, 10);
         } else if (cart_path == NULL && argv[i][0] != '-') {
             cart_path = argv[i];
         }
@@ -627,12 +640,30 @@ int main(int argc, char *argv[])
                 frame_limit--;
                 continue;
             }
+            if (autoplay) {
+                /* A monkey at the controls: a new combination of buttons
+                   every 4..34 frames, from its own generator so that the
+                   cart's rnd() is left alone.  Most combinations hold O or
+                   X, which is what moves a game past its menus.
+                   컨트롤러 앞의 원숭이: 4..34 프레임마다 새 버튼 조합을,
+                   카트의 rnd()를 건드리지 않는 자기 생성기로 고른다. */
+                static int hold = 0;
+                if (--hold <= 0) {
+                    autoplay_seed = autoplay_seed * 1103515245u + 12345u;
+                    unsigned r = autoplay_seed >> 8;
+                    uint8_t b = (uint8_t)(r & 0x0f);          /* directions */
+                    if ((r >> 4) % 3 != 0) b |= 1 << ((r >> 6) & 1 ? 4 : 5);
+                    pico8_btn_state[0] = b;
+                    hold = 4 + (int)((r >> 8) % 31);
+                }
+            }
             if (has_update60 || (pico8_frame_count % 2) == 0) {
                 uint64_t t0 = SDL_GetPerformanceCounter();
                 pico8_update_input(has_update60);
                 pico8_vm_call_update();
                 if (has_draw) pico8_vm_call_draw();
                 uint64_t dt = SDL_GetPerformanceCounter() - t0;
+                pico8_video_frame(has_update60 ? 60 : 30);
                 busy += dt;
                 if (dt > worst) worst = dt;
                 ticks++;
@@ -646,8 +677,9 @@ int main(int argc, char *argv[])
 
         if (bench_frames > 0 && ticks > 0) {
             double f = 1000.0 / (double)SDL_GetPerformanceFrequency();
-            fprintf(stderr, "bench: %d updates, %.3f ms avg, %.3f ms worst (%s)\n",
-                    ticks, busy * f / ticks, worst * f, has_update60 ? "60fps" : "30fps");
+            fprintf(stderr, "bench: %d updates, %.3f ms avg, %.3f ms worst (%s)%s\n",
+                    ticks, busy * f / ticks, worst * f, has_update60 ? "60fps" : "30fps",
+                    pico8_vm_halted ? ", stopped by an error" : "");
         }
 
         pico8_vm_destroy();

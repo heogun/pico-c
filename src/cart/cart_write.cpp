@@ -183,6 +183,12 @@ int cart_write_p8(const char *path, const uint8_t *d,
         }
     }
 
+    /* __label__ : 128 rows of 128 colour digits, where PICO-8 puts it. */
+    if (!g_cart_label.empty()) {
+        out += "__label__\n";
+        out += g_cart_label;
+    }
+
     /* __map__ : 32 rows of 256 hex digits. */
     last = -1;
     for (int row = 0; row < 32; row++)

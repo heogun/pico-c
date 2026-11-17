@@ -15,6 +15,7 @@ tests/
 | File | What it does |
 |------|--------------|
 | `cmp_*.p8` | the regression suite: every cart prints its result with `printh()`, so the transcript can be compared with the one of the real PICO-8 |
+| `cmp_tables.p8`, `cmp_line_pen.p8`, `cmp_palette.p8`, `cmp_memwrap.p8` | behaviour found by playing real games: table helpers while the table changes, `line(x,y)`, the pen colour, the secret palette, addresses that wrap at 64KB |
 | `cmp_syntax_*.p8` | one syntax error each (a block or a bracket left open, a missing goto label, a stray `end`): the error block PICO-8 prints |
 | `cmp_stat_time.p8` | the clock: the values cannot be compared literally, so the cart only prints properties that hold at every point in time |
 | `test.p8` | the small demo cart used to try the emulator out |

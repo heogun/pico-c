@@ -12,3 +12,8 @@ cmp_savegen.p8
 # cmp_savereload.p8 used to be in this list as well.  It saves a cart and
 # loads it back, and the oracle now resolves the file it writes next to the
 # cart it runs, so it matches again.
+
+# cmp_import.p8 imports tests/carts/import_grad.png by a relative path, which
+# the oracle looks up in its own carts folder.  Its expected transcript was
+# measured on PICO-8 0.2.7 with the picture copied there.
+cmp_import.p8

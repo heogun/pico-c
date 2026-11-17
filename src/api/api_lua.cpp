@@ -22,22 +22,52 @@
 #include "api_internal.h"
 
 /*
- * foreach(table, function) — run a function for every element of a table.
+ * The way PICO-8 walks a table in all() and foreach() (measured on 0.2.7):
+ * the walk moves on only when the slot it is at still holds the value it
+ * gave last, and it skips holes.  So the element that was just visited may
+ * be deleted (del() moves the rest down) without the next one being
+ * skipped, an element deleted further on is not visited, and an element
+ * added at the end is.
  *
- * The function gets the key and the value of one element.  The loop stops
- * early when the function returns true.
+ * PICO-8이 all()과 foreach()에서 테이블을 도는 방식(0.2.7 실측): 지금 칸에
+ * 마지막으로 준 값이 그대로 있을 때만 다음으로 가고, 구멍은 건너뛴다. 그래서
+ * 방금 방문한 원소를 지워도(del()이 나머지를 당김) 다음 원소를 건너뛰지 않고,
+ * 뒤쪽에서 지운 원소는 방문하지 않으며, 끝에 더한 원소는 방문한다.
+ */
+static int walk_next(lua_State *L, int table, int *pos, int prev)
+{
+    lua_rawgeti(L, table, *pos);
+    int same = lua_rawequal(L, -1, prev);
+    lua_pop(L, 1);
+    if (same) (*pos)++;
+    int len = (int)lua_rawlen(L, table);
+    for (;;) {
+        lua_rawgeti(L, table, *pos);
+        if (!lua_isnil(L, -1) || *pos > len) return !lua_isnil(L, -1);
+        lua_pop(L, 1);
+        (*pos)++;
+    }
+}
+
+/*
+ * foreach(table, function) — call a function with every element of a table.
  *
- * 함수가 테이블의 원소 하나마다 키와 값을 받는다. 함수가 true를 돌려주면
- * 일찍 끝난다.
+ * Walks the table like all() (see walk_next()).  A nil table does nothing.
+ *
+ * all()처럼 테이블을 돈다(walk_next() 참고). nil 테이블이면 아무것도 하지 않는다.
  */
 static int pico8_foreach(lua_State *L)
 {
+    if (lua_isnoneornil(L, 1)) return 0;
     luaL_checktype(L, 1, LUA_TTABLE);
     luaL_checktype(L, 2, LUA_TFUNCTION);
-    unsigned len = (unsigned)lua_rawlen(L, 1);
-    for (unsigned i = 1; i <= len; i++) {
+    lua_settop(L, 2);
+    int pos = 1;
+    lua_pushnil(L);                             /* prev, at index 3 */
+    while (walk_next(L, 1, &pos, 3)) {
+        lua_replace(L, 3);                      /* prev = element */
         lua_pushvalue(L, 2);
-        lua_rawgeti(L, 1, i);
+        lua_pushvalue(L, 3);
         lua_call(L, 1, 0);
     }
     return 0;
@@ -144,26 +174,25 @@ static int pico8_rnd(lua_State *L)
 }
 
 /*
- * count(table) — the number of elements in a table.
+ * count(table, [value]) — the length of a table, or how often a value is in it.
  *
- * Counts the elements the way PICO-8 does, which is not always the same as
- * the length of the array part.
+ * With a value, counts the elements equal to it (numbers, strings, tables:
+ * by identity).  A nil table gives no value at all, like PICO-8.
  *
- * PICO-8이 세는 방식대로 원소를 센다. 배열 부분의 길이와 항상 같지는 않다.
+ * 값을 주면 그 값과 같은 원소를 센다(숫자, 문자열, 테이블은 동일성). nil
+ * 테이블이면 PICO-8처럼 아무 값도 돌려주지 않는다.
  */
 static int pico8_count(lua_State *L)
 {
-    if (lua_gettop(L) < 1 || lua_isnil(L, 1)) { lua_pushinteger(L, 0); return 1; }
+    if (lua_isnoneornil(L, 1)) return 0;
     luaL_checktype(L, 1, LUA_TTABLE);
     int n = (int)lua_rawlen(L, 1);
     if (lua_gettop(L) < 2) { lua_pushinteger(L, n); return 1; }
-    int target = fix32_to_int(luaL_checknumber(L, 2));
     int cnt = 0;
     for (int i = 1; i <= n; i++) {
         lua_rawgeti(L, 1, i);
-        int v = lua_isnumber(L, -1) ? (int)lua_tonumber(L, -1) : 0;
+        if (lua_rawequal(L, -1, 2)) cnt++;
         lua_pop(L, 1);
-        if (v == target) cnt++;
     }
     lua_pushinteger(L, cnt);
     return 1;
@@ -173,13 +202,16 @@ static int pico8_count(lua_State *L)
  * deli(table, [position]) — remove an element from a table.
  *
  * Without a position the last element is removed, otherwise the one at
- * that position.  The elements after it move down.
+ * that position.  The elements after it move down.  Returns the removed
+ * element; a nil table or a position outside of the table gives no value.
  *
- * 위치를 주지 않으면 마지막 원소를, 주면 그 위치의 원소를 지운다. 그 뒤의
- * 원소들이 앞으로 당겨진다.
+ * 위치가 없으면 마지막 원소를, 있으면 그 위치의 원소를 지우고 뒤의 원소들을
+ * 당긴다. 지운 원소를 돌려준다. nil 테이블이나 범위 밖 위치면 아무 값도
+ * 돌려주지 않는다.
  */
 static int pico8_deli(lua_State *L)
 {
+    if (lua_isnoneornil(L, 1)) return 0;
     luaL_checktype(L, 1, LUA_TTABLE);
     int n = (int)lua_rawlen(L, 1);
     int idx = (int)luaL_optinteger(L, 2, n);
@@ -235,75 +267,107 @@ static int pico8_serial(lua_State *L)
 }
 
 /*
- * add(table, value) — append a value to a table.
+ * add(table, value, [position]) — put a value into a table.
  *
- * Puts the value after the last element of the sequence.  A nil table is
- * ignored, as on PICO-8.
+ * Appends the value, or inserts it at the position (1 .. #table + 1, the
+ * elements from there move up; any other position is the error "position
+ * out of bounds").  Returns the value.  A nil table gives no value.
  *
- * 값을 시퀀스의 마지막 원소 뒤에 넣는다. PICO-8처럼 nil 테이블은 무시한다.
+ * 값을 끝에 붙이거나, 위치(1 .. #table + 1)에 끼워 넣는다(그 뒤 원소는 한 칸씩
+ * 밀리고, 다른 위치는 "position out of bounds" 오류). 값을 돌려준다. nil
+ * 테이블이면 아무 값도 돌려주지 않는다.
  */
 static int pico8_add(lua_State *L)
 {
-    if (lua_isnil(L, 1)) return 0;
+    if (lua_isnoneornil(L, 1)) return 0;
     luaL_checktype(L, 1, LUA_TTABLE);
+    lua_settop(L, 3);
+    int n = (int)lua_rawlen(L, 1);
+    int pos = n + 1;
+    if (!lua_isnil(L, 3)) {
+        pos = (int)luaL_checkinteger(L, 3);
+        if (pos < 1 || pos > n + 1) return luaL_error(L, "position out of bounds");
+        for (int i = n; i >= pos; i--) {
+            lua_rawgeti(L, 1, i);
+            lua_rawseti(L, 1, i + 1);
+        }
+    }
     lua_pushvalue(L, 2);
-    lua_rawseti(L, 1, (int)lua_rawlen(L, 1) + 1);
-    return 0;
+    lua_rawseti(L, 1, pos);
+    lua_pushvalue(L, 2);
+    return 1;
 }
 
 /*
- * del(table) — remove a cart from the list of carts of the shell.
+ * del(table, value) — remove a value from a table.
  *
- * 셸의 카트 목록에서 카트를 지운다.
+ * Removes the first element equal to the value (the elements after it move
+ * down) and returns it.  When the value is not there, or the table is nil,
+ * nothing is removed and no value is returned.
+ *
+ * 값과 같은 첫 원소를 지우고(뒤 원소들을 당김) 그것을 돌려준다. 값이 없거나
+ * 테이블이 nil이면 아무것도 지우지 않고 아무 값도 돌려주지 않는다.
  */
 static int pico8_del(lua_State *L)
 {
+    if (lua_isnoneornil(L, 1)) return 0;
     luaL_checktype(L, 1, LUA_TTABLE);
+    lua_settop(L, 2);
     int n = (int)lua_rawlen(L, 1);
-    int written = 0;
     for (int i = 1; i <= n; i++) {
         lua_rawgeti(L, 1, i);
-        int equal = lua_rawequal(L, -1, 2);
-        lua_pop(L, 1);
-        if (!equal) {
-            written++;
-            lua_rawgeti(L, 1, i);
-            lua_rawseti(L, 1, written);
+        if (lua_rawequal(L, -1, 2)) {
+            for (int j = i; j < n; j++) {
+                lua_rawgeti(L, 1, j + 1);
+                lua_rawseti(L, 1, j);
+            }
+            lua_pushnil(L);
+            lua_rawseti(L, 1, n);
+            return 1;                           /* the removed element */
         }
+        lua_pop(L, 1);
     }
-    for (int i = written + 1; i <= n; i++)
-        lua_pushnil(L), lua_rawseti(L, 1, i);
     return 0;
 }
 
 /*
- * all() — every cart of the shell.
+ * all_step(L) — the iterator that all() returns.
  *
- * Returns the table with all the carts of the cartridge tab.
+ * Upvalue 1 is the table, 2 the position, 3 the element given last.
  *
- * 카트리지 탭의 모든 카트를 담은 테이블을 돌려준다.
+ * all()이 돌려주는 반복자. 업밸류 1은 테이블, 2는 위치, 3은 마지막으로 준 원소.
+ */
+static int all_step(lua_State *L)
+{
+    int pos = (int)lua_tointeger(L, lua_upvalueindex(2));
+    if (!walk_next(L, lua_upvalueindex(1), &pos, lua_upvalueindex(3))) return 0;
+    lua_pushinteger(L, pos);
+    lua_replace(L, lua_upvalueindex(2));
+    lua_pushvalue(L, -1);
+    lua_replace(L, lua_upvalueindex(3));
+    return 1;
+}
+
+/*
+ * all(table) — an iterator over the elements of a table, for "for in".
+ *
+ * Walks the table the PICO-8 way (see walk_next()).  A nil table gives an
+ * iterator that ends at once.
+ *
+ * "for in"에 쓰는 테이블 원소 반복자. PICO-8 방식으로 돈다(walk_next() 참고).
+ * nil 테이블이면 바로 끝나는 반복자를 준다.
  */
 static int pico8_all(lua_State *L)
 {
-    if (lua_gettop(L) < 1 || lua_isnil(L, 1)) {
-        const char *code = "return function() return nil end";
-        luaL_loadstring(L, code);
-        lua_call(L, 0, 1);
-        return 1;
+    if (lua_isnoneornil(L, 1)) {
+        lua_newtable(L);                        /* an empty table */
+    } else {
+        luaL_checktype(L, 1, LUA_TTABLE);
+        lua_pushvalue(L, 1);
     }
-    luaL_checktype(L, 1, LUA_TTABLE);
-    lua_getglobal(L, "_pico8_all_func");
-    if (lua_isnil(L, -1)) {
-        lua_pop(L, 1);
-        const char *code = "return function(t) local i=0; local n=#t; "
-                           "return function() i=i+1; if i<=n then return t[i] end end end";
-        luaL_loadstring(L, code);
-        lua_call(L, 0, 1);
-        lua_pushvalue(L, -1);
-        lua_setglobal(L, "_pico8_all_func");
-    }
-    lua_pushvalue(L, 1);
-    lua_call(L, 1, 1);
+    lua_pushinteger(L, 1);
+    lua_pushnil(L);
+    lua_pushcclosure(L, all_step, 3);
     return 1;
 }
 

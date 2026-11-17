@@ -261,7 +261,7 @@ static std::string runtime_error_block(const char *msg)
         ErrorFrame &f = frames[nframes++];
         snprintf(f.name, sizeof f.name, "%s",
                  (ar.name && *ar.name) ? ar.name : "?");
-        f.named = (ar.name && *ar.name) != NULL;
+        f.named = ar.name && *ar.name;
         f.line = ar.currentline;
         f.is_main = ar.what && strcmp(ar.what, "main") == 0;
     }

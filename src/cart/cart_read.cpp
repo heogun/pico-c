@@ -241,18 +241,19 @@ static int check_source_limits(const std::string &source)
 }
 
 /*
- * parse_p8_text(text, textlen, cart_data, code) — read a .p8 file.
+ * parse_p8_text(text, textlen, cart_data, code, label) — read a .p8 file.
  *
  * Goes over the file line by line and follows the sections: __lua__ is the
  * source, __gfx__ the sprite sheet, __gff__ the graphics flags, __map__ the
  * map, __sfx__ the sound effects, __music__ the songs and __label__ the
- * name of the cart.  The data ends up in `cart_data` (a 0x4300 byte image
- * of the RAM) and the source in `code`.
+ * label picture.  The data ends up in `cart_data` (a 0x4300 byte image of
+ * the RAM), the source in `code` and, when `label` is given, the label
+ * text in it.
  *
  * 파일을 한 줄씩 훑으며 섹션을 따라간다. __lua__는 소스, __gfx__는 스프라이트
  * 시트, __gff__는 그래픽 플래그, __map__는 맵, __sfx__는 효과음, __music__는
- * song, __label__는 카트 이름이다. 데이터는 `cart_data`(RAM의 0x4300바이트
- * 이미지)에, 소스는 `code`에 들어간다.
+ * song, __label__는 라벨 그림이다. 데이터는 `cart_data`(RAM의 0x4300바이트
+ * 이미지)에, 소스는 `code`에, `label`을 주면 라벨 텍스트는 거기에 들어간다.
  *
  * The songs start out at the "no pattern" marker 0x41,0x42,0x43,0x44, so
  * that a cart without a __music__ section reports the same values as it
@@ -262,8 +263,11 @@ static int check_source_limits(const std::string &source)
  * __music__ 섹션이 없는 카트는 실제 PICO-8과 같은 값을 보인다.
  */
 int parse_p8_text(const char *text, size_t textlen,
-                         uint8_t *cart_data, std::string &code)
+                         uint8_t *cart_data, std::string &code,
+                         std::string *label)
 {
+    if (label) label->clear();
+    int label_rows = 0;
     enum { SEC_NONE, SEC_LUA, SEC_GFX, SEC_GFF, SEC_MAP, SEC_SFX, SEC_MUSIC, SEC_LABEL };
 
     /* Songs default to the "no pattern" marker 0x41,0x42,0x43,0x44 so a
@@ -357,6 +361,16 @@ int parse_p8_text(const char *text, size_t textlen,
             break;
 
         case SEC_LABEL:
+            /* Kept as text, so that a save writes it back as it was.
+               텍스트로 보관해서 저장할 때 그대로 다시 쓴다. */
+            if (label && label_rows < 128 && len > 0) {
+                std::string row(l, len < 128 ? len : 128);
+                row.resize(128, '0');
+                *label += row + "\n";
+                label_rows++;
+            }
+            break;
+
         default:
             break;
         }
@@ -449,6 +463,7 @@ static int load_p8png(const char *path)
 
     g_cart_source = pico8_charset_from_utf8(raw.data(), raw.size());
     g_cart_path = path ? path : "";
+    g_cart_label.clear();                   /* the picture is not read back */
     cart_snapshot_rom();
 
     int limit = check_source_limits(full);
@@ -477,7 +492,7 @@ static int load_p8_text(const char *path, const std::string &text)
     memset(cart_data, 0, sizeof(cart_data));
 
     std::string raw;
-    parse_p8_text(text.data(), text.size(), cart_data, raw);
+    parse_p8_text(text.data(), text.size(), cart_data, raw, &g_cart_label);
 
     pico8_reset_memory();
     memcpy(pico8_ram, cart_data, PICO8_CART_DATA_SIZE);

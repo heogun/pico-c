@@ -68,8 +68,8 @@ extern int                       g_hist_pos;  /* where we are in it    */
 extern std::string               g_draft;     /* the line that was typed */
 
 extern std::string               g_cart_path; /* the cart that runs    */
-static std::string               g_cart_name; /* its name              */
-static std::string               g_source;    /* its source text       */
+extern std::string               g_cart_name; /* its name              */
+extern std::string               g_source;    /* its source text       */
 extern int                       g_has_cart;  /* is there a cart?      */
 
 extern int                       g_capturing; /* collecting the output */

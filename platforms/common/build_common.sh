@@ -29,13 +29,15 @@ fi
 
 case "$PLATFORM" in
     macos)
-        if [ ! -d /opt/local/include/SDL2 ]; then
-            pc_die "SDL2 not found in /opt/local
-Install it with:  sudo port install sdl2"
+        # MacPorts by default; SDL2_DIR points elsewhere (Homebrew in CI).
+        export SDL2_DIR="${SDL2_DIR:-/opt/local}"
+        if [ ! -d "$SDL2_DIR/include/SDL2" ]; then
+            pc_die "SDL2 not found in $SDL2_DIR
+Install it with:  sudo port install sdl2
+(or set SDL2_DIR, e.g. SDL2_DIR=\$(brew --prefix sdl2))"
         fi
         export CXX="${CXX:-clang++}"
         export AR="${AR:-ar}"
-        export SDL2_DIR="${SDL2_DIR:-/opt/local}"
         ;;
     linux)
         if [ ! -d /usr/include/SDL2 ]; then

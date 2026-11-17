@@ -1,0 +1,24 @@
+del first: 2 1,3,2,4,#4
+del missing:  1,3,2,4,#4
+deli: 6 5,7,#2 7 5,#1
+foreach del cur: 1,2,3,4,5,6, 1,4,5,6,#4
+all del odd: 1,2,3,4,5,6, 2,4,6,#3
+all add: 1,2,3,9,
+all del later: 1,2,4,
+all del earlier: 1,2,3,4,
+foreach hole: 1,3,
+count nil: 
+foreach nil ok
+all nil ok
+add nil: 
+del nil: 
+deli nil: 
+end
+add ret: 9 1,2,3,9,#4
+add idx: 9 1,9,2,3,#4
+add nil val: [nil] 1,2,3,#3
+count str: 2 num: 1 frac: 1 all: 5
+deli 0:  1,2,3,#3 deli 9:  1,2,3,#3
+deli empty:  #0
+del table: true 2
+end

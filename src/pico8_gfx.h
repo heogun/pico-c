@@ -95,4 +95,18 @@ void pico8_draw_char_scaled(int x, int y, uint8_t ch, uint8_t color, int scale);
  */
 void pico8_pal_reset_all(void);
 
+/*
+ * Gif recording (src/video.cpp): the host hands over every frame the cart
+ * draws (fps 30 or 60); extcmd("rec") marks the start and extcmd("video")
+ * writes the frames since then (or the last 8 seconds) as a gif.  The save
+ * returns 0 on success, -1 otherwise.
+ *
+ * gif 녹화(src/video.cpp): 호스트가 카트가 그린 프레임마다 넘기고(fps 30 또는
+ * 60), extcmd("rec")이 시작점을 표시하며 extcmd("video")가 그 뒤(없으면 최근
+ * 8초)의 프레임을 gif로 쓴다. 저장은 성공하면 0, 아니면 -1.
+ */
+void pico8_video_frame(int fps);
+void pico8_video_start(void);
+int  pico8_video_save(const char *path);
+
 #endif /* PICO8_GFX_H */
