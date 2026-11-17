@@ -48,6 +48,14 @@ TRANSFER_FILES = ['p8save_out.p8', 'p8png_out.p8.png']
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wavnotes  # noqa: E402
 
+# Transcripts hold arbitrary bytes (decoded as latin-1), which a console with a
+# narrow code page such as cp949 cannot print; escape them instead of crashing.
+# 트랜스크립트는 임의의 바이트(latin-1로 디코드)라 cp949 같은 콘솔에서는 출력할 수
+# 없다. 예외로 멈추는 대신 이스케이프해서 출력한다.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(errors='backslashreplace')
+
 
 def posix(path):
     return path.replace('\\', '/')

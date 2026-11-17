@@ -42,7 +42,7 @@ if [ ! -x "$BIN" ]; then
 Build it first:  make PLATFORM=$PLATFORM"
 fi
 
-PY="$(command -v python3 || command -v python || true)"
+PY="$(pc_python)"
 [ -n "$PY" ] || pc_die "python3 is needed to run the suite"
 
 exec "$PY" "$PC_ROOT/tests/tools/run_tests.py" --bin "$BIN" "$@"

@@ -58,6 +58,13 @@ else ifeq ($(PLATFORM),windows)
   SDL_LIBS   := -L$(SDL2_DIR)/lib -lmingw32 -lSDL2main -lSDL2
   EXE_SUFFIX := .exe
   CODESIGN   :=
+  # The MinGW C++ runtime is linked in, so pico-c.exe only needs SDL2.dll,
+  # which is copied next to it.  Without this the exe will not start outside
+  # a shell that has the MinGW and SDL2 folders on its PATH.
+  # MinGW C++ 런타임은 정적으로 링크하고 SDL2.dll은 exe 옆에 복사한다.
+  # 그렇지 않으면 MinGW/SDL2 폴더가 PATH에 없는 곳에서 exe가 실행되지 않는다.
+  RUNTIME_LDFLAGS := -static-libgcc -static-libstdc++
+  RUNTIME_DLLS    := $(SDL2_DIR)/bin/SDL2.dll
 else
   $(error Unknown PLATFORM '$(PLATFORM)' (expected macos, linux or windows))
 endif
@@ -70,6 +77,9 @@ endif
 ifeq ($(origin AR),default)
   AR := $(DEFAULT_AR)
 endif
+
+RUNTIME_LDFLAGS ?=
+RUNTIME_DLLS    ?=
 
 CXXFLAGS ?= -O2 -Wall -Wextra -std=gnu++17
 CXXFLAGS += $(SDL_CFLAGS)
@@ -110,7 +120,14 @@ Z8LUA_OBJS := $(addprefix $(Z8LUA_OBJ_DIR)/, $(addsuffix .o, $(Z8LUA_NAMES)))
 
 .PHONY: all clean run asan help
 
-all: $(TARGET)
+# The DLLs the binary loads at run time, copied next to it (Windows only).
+# 실행 시 필요한 DLL을 바이너리 옆에 복사한 것 (Windows 전용).
+RUNTIME_DLL_COPIES := $(addprefix $(BUILD_DIR)/, $(notdir $(RUNTIME_DLLS)))
+
+all: $(TARGET) $(RUNTIME_DLL_COPIES)
+
+$(RUNTIME_DLL_COPIES): $(RUNTIME_DLLS) | $(BUILD_DIR)
+	cp -f $(filter %/$(notdir $@),$(RUNTIME_DLLS)) $@
 
 help:
 	@echo "targets: all (default), run, asan, clean"
@@ -134,7 +151,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp $(Z8LUA_STAMP) | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) -I$(SRC_DIR)/api -I$(Z8LUA_DIR) -c -o $@ $<
 
 $(TARGET): $(CPP_OBJS) $(Z8LUA_A)
-	$(CXX) $(CXXFLAGS) -o $@ $(CPP_OBJS) $(Z8LUA_A) $(LIBS) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -o $@ $(CPP_OBJS) $(Z8LUA_A) $(LIBS) $(RUNTIME_LDFLAGS) $(LDFLAGS)
 	@[ -n "$(CODESIGN)" ] && $(CODESIGN) $@ || true
 
 # ------------------------------------------------------------------- z8lua --
