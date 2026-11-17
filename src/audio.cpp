@@ -847,7 +847,7 @@ static float channel_sample(struct Channel *ch, float inv_sr, int *is_music)
     param.freq        = 0.0f;
     param.volume      = 0.0f;
     param.is_music    = ch->is_music;
-    param.filt        = (struct SfxFilters){ 0, 0, 0, ch->rev_level, 0 };
+    param.filt        = SfxFilters{ 0, 0, 0, ch->rev_level, 0 };
 
     int playing = ch->sfx >= 0;
     update_sfx_state(ch, &param, inv_sr);

@@ -18,9 +18,6 @@
 #include <vector>
 #include <algorithm>
 
-#include <dirent.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "pico8.h"
 #include "util.h"
@@ -41,16 +38,12 @@
 static std::vector<std::string> complete_files(const std::string &prefix)
 {
     std::vector<std::string> out;
-    DIR *d = opendir(".");
-    if (!d) return out;
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-        std::string n = ent->d_name;
-        if (!shell_is_cart_name(n)) continue;
-        if (n.compare(0, prefix.size(), prefix) == 0) out.push_back(n);
+    std::vector<UtilDirEntry> entries;
+    if (!util_list_dir(".", entries)) return out;
+    for (const UtilDirEntry &e : entries) {
+        if (!shell_is_cart_name(e.name)) continue;
+        if (e.name.compare(0, prefix.size(), prefix) == 0) out.push_back(e.name);
     }
-    closedir(d);
     std::sort(out.begin(), out.end());
     return out;
 }

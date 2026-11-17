@@ -17,9 +17,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "api_internal.h"
+#include "util.h"
 
 /*
  * The way PICO-8 walks a table in all() and foreach() (measured on 0.2.7):
@@ -256,7 +256,7 @@ static int pico8_serial(lua_State *L)
         fflush(stdout);
         moved = (int)fwrite(pico8_ram + address, 1, (size_t)length, stdout);
         fflush(stdout);
-    } else if (channel == 0x804 && length > 0 && !isatty(fileno(stdin))) {
+    } else if (channel == 0x804 && length > 0 && !util_stdin_is_terminal()) {
         /* A terminal is left alone: reading it would stop the emulator
            until someone types.  터미널은 건드리지 않는다: 읽으면 누군가
            입력할 때까지 에뮬레이터가 멈춘다. */

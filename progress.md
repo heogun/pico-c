@@ -384,6 +384,7 @@ PICO-8은 카트의 `__lua__` 소스가 **65536바이트를 넘거나 토큰이 
 - [x] **extcmd 캡처, serial** — 완료 (2026-11-17, §9-4). `label`, gif는 §10에서 완료
 - [x] **CI, 실제 게임 호환성, 라벨/gif, 경고 정리** — 완료 (2026-11-17, §10)
 - [x] **잠재 버그 수정** (셸 카트 상태, import) — 완료 (2026-11-17, §11)
+- [x] **Windows 네이티브(MSVC) 빌드 + CI** — §12
 - [ ] (방해 요소) `/Applications/PICO-8.app` 자체가 멈춤 — /tmp/p8app 사본 사용 유지
 
 ---
@@ -721,3 +722,24 @@ bit0 편집 모드(소리 무관), bit1 noiz, bit2 buzz, detune = (b/8)%3, rever
   찾지 못했기 때문이었다. 같은 그라데이션에서 체크섬(-21079)이 PICO-8과 같아 **색 매칭도 일치** 확인.
   회귀 `cmp_import.p8` + `import_grad.png`(오라클은 자기 카트 폴더에서 찾으므로 KNOWN, 기대값은 실측).
 - 결과: `test.sh` **104 passed**, `oracle.sh` 52 MATCH + 3 KNOWN.
+
+---
+
+## 12. Windows 네이티브 빌드 (MSVC) (2026-11-17, 브랜치 `feat/msvc`)
+
+- **이식성**: POSIX 호출을 `src/util.{h,cpp}`의 헬퍼로 모았다 — 파일 시스템은 `std::filesystem`
+  (`util_list_dir`, `util_is_dir/file`, `util_cwd`, `util_chdir`, `util_make_dir`), 나머지는 시스템별 대응
+  (`util_popen/pclose` = `_popen`, `util_stdin_is_terminal` = `_isatty`, `util_local_time/utc_time` =
+  `localtime_s/gmtime_s`). GNU 복합 리터럴 1곳 제거. `system("mkdir -p backup")`도 헬퍼로(Windows cmd에서는
+  `-p` 폴더가 생겼을 것).
+- **CMake**: `CMakeLists.txt` — z8lua 클론/고정/패치를 Makefile과 같게(configure 단계), z8lua `.c`를 C++로,
+  SDL2는 `find_package(SDL2 CONFIG)`(vcpkg/공식 VC 패키지/MacPorts), `<SDL2/SDL.h>`의 상위 폴더 탐색,
+  MSVC는 `/utf-8 /W3`, `_CRT_SECURE_NO_WARNINGS`, SDL2.dll을 실행 파일 옆에 복사, macOS는 ad-hoc 서명.
+  macOS에서 CMake 빌드로도 104/104 통과 확인.
+- **테스트 실행기**: `tests/tools/run_tests.py` — bash 스크립트의 트랜스크립트/오디오 비교를 Python으로 옮긴
+  유일한 구현. `\r\n` 정규화, 마스크(sed 치환식) 지원, `audio-check`/`audio-record` 하위 명령.
+  `test_common.sh`와 `audio_common.sh`는 이것을 부르는 껍데기. 결과 104/104 동일, 실패 검출 확인.
+- **줄바꿈**: `.gitattributes`로 텍스트는 항상 LF(.bat만 CRLF). Windows Git의 CRLF 변환이 바이트 크기
+  테스트와 z8lua 패치를 깨기 때문. z8lua 클론은 `-c core.autocrlf=false`.
+- **스크립트/CI**: `platforms/windows/build-msvc.bat`, `test-msvc.bat`, CI `windows-msvc` 작업
+  (vcpkg `sdl2:x64-windows` → CMake → `run_tests.py`).

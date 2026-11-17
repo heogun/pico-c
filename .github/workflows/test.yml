@@ -1,4 +1,6 @@
-# Build pico-c from a fresh checkout and run the regression suite.
+# Build pico-c from a fresh checkout and run the regression suite, on Linux
+# and macOS with the Makefile and on Windows with Visual Studio (MSVC) and
+# CMake.
 #
 # The suite does not need PICO-8: the golden transcripts and the audio
 # expectations in tests/ were recorded from it.  make clones z8lua at the
@@ -27,6 +29,19 @@ jobs:
         run: platforms/linux/build.sh
       - name: Test
         run: platforms/linux/test.sh
+
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: vcpkg install sdl2:x64-windows
+      - name: Build
+        run: |
+          cmake -S . -B build/msvc -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          cmake --build build/msvc --config Release
+      - name: Test
+        run: python tests/tools/run_tests.py --bin build/msvc/Release/pico-c.exe
 
   macos:
     runs-on: macos-latest

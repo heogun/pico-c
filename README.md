@@ -41,6 +41,12 @@ dependencies it needs and the scripts that build and test it.
 | macOS | `platforms/macos/build.sh` | `platforms/macos/test.sh` |
 | Linux | `platforms/linux/build.sh` | `platforms/linux/test.sh` |
 | Windows (MSYS2/MinGW) | `platforms/windows/build.bat` | `platforms/windows/test.bat` |
+| Windows (Visual Studio) | `platforms/windows/build-msvc.bat` | `platforms/windows/test-msvc.bat` |
+
+The Visual Studio build goes through CMake (`CMakeLists.txt`) and takes SDL2
+from vcpkg (`vcpkg install sdl2:x64-windows`, with `VCPKG_ROOT` set); see
+`platforms/windows/README.md`.  The test suite is `tests/tools/run_tests.py`,
+which only needs Python 3.
 
 The top level `Makefile` does the same thing and picks the platform from
 `uname -s`.  Every artifact lands in `build/<platform>/`, so the platforms

@@ -88,12 +88,15 @@ cc -o build/macos/dumpcart tests/tools/dumpcart.c
 
 ## Running the suite
 
-The suite runs on every platform, it does not need PICO-8:
+The suite runs on every platform, it does not need PICO-8.  It is one
+Python 3 script, `tools/run_tests.py`, which the platform scripts call:
 
 ```sh
-platforms/macos/test.sh      # macOS
-platforms/linux/test.sh      # Linux
-platforms/windows/test.bat   # Windows (MSYS2)
+platforms/macos/test.sh              # macOS
+platforms/linux/test.sh              # Linux
+platforms/windows/test.bat           # Windows (MSYS2)
+platforms\windows\test-msvc.bat      # Windows (Visual Studio)
+python3 tests/tools/run_tests.py --bin <pico-c> [cart ...]
 ```
 
 On macOS the transcripts can also be checked against the real PICO-8:

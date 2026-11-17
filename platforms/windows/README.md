@@ -1,6 +1,32 @@
 # Windows
 
-Build and test pico-c on Windows with MSYS2 / MinGW-w64.
+pico-c builds on Windows in two ways, both giving a native `pico-c.exe`:
+with Visual Studio (MSVC) and CMake, or with MSYS2 / MinGW-w64 and the
+Makefile.
+
+## Visual Studio (MSVC)
+
+| What | How to get it |
+|------|---------------|
+| Visual Studio 2022 | with "Desktop development with C++" (MSVC, CMake) |
+| SDL2 | [vcpkg](https://vcpkg.io): `vcpkg install sdl2:x64-windows`, and set `VCPKG_ROOT` |
+| Git | to clone z8lua, which CMake does at configure time |
+| Python 3 | for the test suite |
+
+From a "Developer Command Prompt" (or any prompt where `cmake` works):
+
+```bat
+platforms\windows\build-msvc.bat
+platforms\windows\test-msvc.bat
+```
+
+The binary lands in `build\msvc\Release\pico-c.exe`, with `SDL2.dll` next to
+it.  Without vcpkg, point `SDL2_DIR` at the `cmake` folder of the SDL2
+development package for Visual C++.  The repository keeps its text files
+with LF line endings on every system (`.gitattributes`), which the test
+carts and the z8lua patch need.
+
+## MSYS2 / MinGW-w64
 
 ## Dependencies
 

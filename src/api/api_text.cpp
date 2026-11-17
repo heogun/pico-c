@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "api_internal.h"
+#include "util.h"
 
 /*
  * print_advance(c) — how many pixels a character moves the cursor.
@@ -329,13 +330,13 @@ static int pico8_printh(lua_State *L)
         if (strcmp(filename, "@clip") == 0) {
             /* Copy to the host clipboard (no trailing newline). */
 #if defined(__APPLE__)
-            FILE *p = popen("pbcopy 2>/dev/null", "w");
+            FILE *p = util_popen("pbcopy 2>/dev/null", "w");
 #elif defined(_WIN32)
-            FILE *p = popen("clip", "w");
+            FILE *p = util_popen("clip", "w");
 #else
-            FILE *p = popen("xclip -selection clipboard 2>/dev/null", "w");
+            FILE *p = util_popen("xclip -selection clipboard 2>/dev/null", "w");
 #endif
-            if (p) { fputs(msg, p); pclose(p); }
+            if (p) { fputs(msg, p); util_pclose(p); }
             return 0;
         }
 

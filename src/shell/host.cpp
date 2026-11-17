@@ -20,9 +20,6 @@
 #include <vector>
 #include <algorithm>
 
-#include <dirent.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "pico8.h"
 #include "util.h"
@@ -81,9 +78,8 @@ std::string shell_resolve_cart(const std::string &name)
         cands.push_back(name + ".png");
     }
 
-    struct stat st;
     for (size_t i = 0; i < cands.size(); i++)
-        if (stat(cands[i].c_str(), &st) == 0 && S_ISREG(st.st_mode))
+        if (util_is_file(cands[i]))
             return cands[i];
     return "";
 }
@@ -118,8 +114,7 @@ int pico8_console_queue_load(const char *filename, const char *breadcrumb,
             if (!dir.empty()) resolved = shell_resolve_cart(dir + req);
         }
         if (resolved.empty() && req.size() && req[0] == '/') {
-            struct stat st;
-            if (stat(req.c_str(), &st) == 0 && S_ISREG(st.st_mode))
+            if (util_is_file(req))
                 resolved = req;
         }
         if (resolved.empty()) return -1;

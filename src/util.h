@@ -27,8 +27,11 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <time.h>
 
 #include <string>
+#include <vector>
 
 /* ------------------------------------------------------------------ *
  *  Text
@@ -108,5 +111,66 @@ int util_hex_digit(int c);
  * '0'~'9', 'a'~'f', 'A'~'F'이면 참.
  */
 bool util_is_hex_digit(int c);
+
+/* ------------------------------------------------------------------ *
+ *  The host system (the same code on macOS, Linux and Windows)
+ *
+ *  These used to be POSIX calls (opendir, stat, getcwd, popen, isatty,
+ *  localtime_r, ...), which a Windows compiler (MSVC) does not have.  The
+ *  file system goes through std::filesystem, the rest through the
+ *  matching call of each system.
+ *
+ *  호스트 시스템(macOS, Linux, Windows에서 같은 코드). 예전에는 POSIX 호출
+ *  (opendir, stat, getcwd, popen, isatty, localtime_r 등)이었는데 Windows
+ *  컴파일러(MSVC)에는 없다. 파일 시스템은 std::filesystem으로, 나머지는 각
+ *  시스템의 대응 호출로 간다.
+ * ------------------------------------------------------------------ */
+
+/* One entry of a folder.  폴더의 항목 하나. */
+struct UtilDirEntry {
+    std::string name;
+    bool        is_dir;
+};
+
+/*
+ * util_list_dir(dir, out) — the entries of a folder.
+ *
+ * Leaves out the hidden ones (a name that starts with '.'), in the order
+ * the system gives.  False when the folder cannot be read.
+ *
+ * 폴더의 항목들. 숨은 항목('.'으로 시작하는 이름)은 빼고, 시스템이 주는
+ * 순서대로. 폴더를 읽을 수 없으면 거짓.
+ */
+bool util_list_dir(const std::string &dir, std::vector<UtilDirEntry> &out);
+
+/* Is there a folder / a regular file at the path?  그 경로에 폴더 / 파일이 있는가? */
+bool util_is_dir(const std::string &path);
+bool util_is_file(const std::string &path);
+
+/* The working folder, and changing it (false on failure).  작업 폴더, 그리고 바꾸기. */
+std::string util_cwd(void);
+bool        util_chdir(const std::string &path);
+
+/*
+ * util_make_dir(path, parents) — create a folder.
+ *
+ * With `parents` the missing folders above it are made too and a folder
+ * that is already there is fine (like "mkdir -p").
+ *
+ * 폴더를 만든다. `parents`면 위쪽의 없는 폴더도 만들고, 이미 있어도 괜찮다
+ * ("mkdir -p"처럼).
+ */
+bool util_make_dir(const std::string &path, bool parents);
+
+/* popen() / pclose() of the system.  시스템의 popen() / pclose(). */
+FILE *util_popen(const char *command, const char *mode);
+int   util_pclose(FILE *f);
+
+/* Is the standard input a terminal?  표준 입력이 터미널인가? */
+bool util_stdin_is_terminal(void);
+
+/* localtime_r() / gmtime_r(): false on failure.  실패하면 거짓. */
+bool util_local_time(time_t t, struct tm *out);
+bool util_utc_time(time_t t, struct tm *out);
 
 #endif /* PICO8_UTIL_H */
