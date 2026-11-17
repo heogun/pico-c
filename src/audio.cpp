@@ -64,6 +64,32 @@ struct SynthParam {
     float  last_sample;   /* noise filter state */
 };
 
+/*
+ * The custom instrument a channel is playing.
+ *
+ * A note whose waveform is 8..15 does not make a sound of its own: it plays
+ * one of the sound effects 0..7 (the "instrument"), moved up or down by the
+ * pitch of the note (key 24 plays it as written) and scaled by its volume.
+ * The instrument has a clock of its own, which runs at its own speed and
+ * goes on over the notes until something retriggers it (see
+ * instrument_note()).
+ *
+ * 채널이 연주하는 사용자 정의 악기.
+ *
+ * 파형이 8..15인 음은 자기 소리를 내지 않고 효과음 0..7 중 하나("악기")를
+ * 연주한다. 음의 피치만큼 올리거나 내리고(키 24이면 적힌 그대로) 음량을 곱한다.
+ * 악기는 자기 속도로 도는 자기 시계를 가지며, 다시 트리거될 때까지 음을 넘어
+ * 계속 간다(instrument_note() 참고).
+ */
+struct Instrument {
+    int    sfx;           /* 0..7, or -1 when no instrument plays */
+    double offset;        /* note offset inside the instrument */
+    int    trig_key;      /* key of the outer note seen last */
+    int    last_note;     /* note time (floor of Channel::time) seen last */
+    int    prev_key;      /* inner slide memory */
+    float  prev_vol;
+};
+
 struct Channel {
     /* main sfx */
     int    sfx;           /* -1 = idle */
@@ -82,14 +108,36 @@ struct Channel {
 
     /* cached current note (for stat + effects) */
     int    cur_note;
+
+    /* the custom instrument of the current note */
+    struct Instrument inst;
 };
 
+#define CHANNEL_IDLE { -1, 0.0, 0.0, 0, 1, 0, -1, 24, 0.0f, 0.0, 0.0f, -1, \
+                       { -1, 0.0, 24, -1, 24, 0.0f } }
+
 static struct Channel channels[AUDIO_NUM_CHANS] = {
-    { -1, 0.0, 0.0, 0, 1, 0, -1, 24, 0.0f, 0.0, 0.0f, -1 },
-    { -1, 0.0, 0.0, 0, 1, 0, -1, 24, 0.0f, 0.0, 0.0f, -1 },
-    { -1, 0.0, 0.0, 0, 1, 0, -1, 24, 0.0f, 0.0, 0.0f, -1 },
-    { -1, 0.0, 0.0, 0, 1, 0, -1, 24, 0.0f, 0.0, 0.0f, -1 },
+    CHANNEL_IDLE, CHANNEL_IDLE, CHANNEL_IDLE, CHANNEL_IDLE,
 };
+
+/*
+ * reset_instrument(ch) — forget the custom instrument of a channel.
+ *
+ * Called whenever a channel starts a new sound effect, so that its first
+ * custom note triggers the instrument from the start.
+ *
+ * 채널이 새 효과음을 시작할 때마다 부른다. 그래야 첫 사용자 정의 음이 악기를
+ * 처음부터 트리거한다.
+ */
+static void reset_instrument(struct Channel *ch)
+{
+    ch->inst.sfx       = -1;
+    ch->inst.offset    = 0.0;
+    ch->inst.trig_key  = 24;
+    ch->inst.last_note = -1;
+    ch->inst.prev_key  = 24;
+    ch->inst.prev_vol  = 0.0f;
+}
 
 static SDL_AudioDeviceID audio_dev = 0;
 static int audio_ready = 0;
@@ -259,15 +307,203 @@ static float pico8_wave(int instrument, double advance, float freq,
 /* ------------------------------------------------------------------ */
 
 /*
+ * sfx_loop(sfx_id, start, end) — the loop points of a sound effect.
+ *
+ * Bytes 66 and 67 of the sound effect.
+ *
+ * 효과음의 66, 67번째 바이트.
+ */
+static void sfx_loop(int sfx_id, int *start, int *end)
+{
+    *start = ram_byte(PICO8_SFX_ADDR + sfx_id * AUDIO_SFX_SIZE + 66);
+    *end   = ram_byte(PICO8_SFX_ADDR + sfx_id * AUDIO_SFX_SIZE + 67);
+}
+
+/*
+ * sfx_last_note(sfx_id) — where a sound effect without a loop stops.
+ *
+ * The note after the last one that has a volume, or the loop start when
+ * the loop end is zero (PICO-8 reads that as "stop here").
+ *
+ * 음량이 있는 마지막 음의 다음 자리. 루프 끝이 0이고 루프 시작이 있으면 루프
+ * 시작에서 멈춘다(PICO-8은 그것을 "여기서 멈춤"으로 읽는다).
+ */
+static int sfx_last_note(int sfx_id)
+{
+    int last_note = 0;
+    for (int n = 0; n < AUDIO_SFX_NOTES; n++) {
+        struct SfxNote note;
+        sfx_get_note(sfx_id, n, &note);
+        if (note.volume > 0) last_note = n + 1;
+    }
+    int loop_start, loop_end;
+    sfx_loop(sfx_id, &loop_start, &loop_end);
+    if (loop_end == 0 && loop_start > 0 && loop_start < last_note)
+        last_note = loop_start;
+    return last_note;
+}
+
+/*
+ * note_effect(sfx_id, note_id, note, offset, offset_per_second, speed,
+ *             prev_key, prev_vol, freq, volume) — apply the effect of a note.
+ *
+ * Starts from the plain frequency and volume of the note and changes them
+ * the way its effect says: the slide from the previous note, the vibrato,
+ * the drop, the two fades and the two arpeggios (which walk the group of
+ * four notes the note belongs to).  `offset` is the position in the sound
+ * effect, in notes.
+ *
+ * 음의 기본 주파수와 음량에서 시작해, 효과가 말하는 대로 바꾼다: 이전 음에서
+ * 미끄러지는 slide, vibrato, drop, 두 fade, 그리고 음이 속한 네 음 묶음을
+ * 도는 두 arp. `offset`은 효과음 안의 위치(음 단위)다.
+ */
+static void note_effect(int sfx_id, int note_id, const struct SfxNote *note,
+                        double offset, double offset_per_second, int speed,
+                        int prev_key, float prev_vol,
+                        float *freq_out, float *volume_out)
+{
+    float volume = note->volume / 7.0f;
+    float freq   = key_to_freq(note->key);
+    double t     = offset - floor(offset);
+
+    switch (note->effect) {
+    case FX_SLIDE:
+        freq = (float)(key_to_freq(prev_key) * (1.0 - t) + freq * t);
+        if (prev_vol > 0.0f)
+            volume = (float)(prev_vol * (1.0 - t) + volume * t);
+        break;
+    case FX_VIBRATO: {
+        /* half a semitone, 7.5 cycles per note (measured) */
+        double v = fabs(fmod(7.5 * offset / offset_per_second, 1.0) - 0.5) - 0.25;
+        freq = (float)(freq * (1.0 - v) + freq * 1.059463094359 * v);
+        break;
+    }
+    case FX_DROP:
+        freq *= (float)(1.0 - t);
+        break;
+    case FX_FADE_IN:
+        volume *= (float)t;
+        break;
+    case FX_FADE_OUT:
+        volume *= (float)(1.0 - t);
+        break;
+    case FX_ARP_FAST:
+    case FX_ARP_SLOW: {
+        int m = (speed <= 8 ? 32 : 16) / (note->effect == FX_ARP_FAST ? 4 : 8);
+        int n = (int)(m * 7.5 * offset / offset_per_second);
+        int arp_note = (note_id & ~3) | (n & 3);
+        struct SfxNote an;
+        sfx_get_note(sfx_id, arp_note, &an);
+        freq = key_to_freq(an.key);
+        break;
+    }
+    default:
+        break;
+    }
+
+    *freq_out   = freq;
+    *volume_out = volume;
+}
+
+/*
+ * instrument_note(ch, note) — decide whether a custom note retriggers.
+ *
+ * Called once per note of the channel, also for the silent ones.  The rules
+ * were measured on PICO-8 0.2.7 (tests/carts/cmp_audio_inst.p8):
+ *
+ *   - the instrument starts over when the note uses another instrument
+ *     than the one playing (or the previous note was not a custom one);
+ *   - it starts over when the pitch changes, unless the note slides;
+ *   - it starts over on the drop (3) and the fade in (4) effects;
+ *   - otherwise its clock just goes on, even through notes of volume 0.
+ *
+ * 채널의 음마다 한 번 부른다(소리 없는 음도). 규칙은 PICO-8 0.2.7에서 측정했다:
+ *
+ *   - 다른 악기를 쓰는 음이면(또는 이전 음이 사용자 정의 음이 아니면) 처음부터;
+ *   - 피치가 바뀌면 처음부터, 단 slide 음은 제외;
+ *   - drop(3)과 fade in(4) 효과면 처음부터;
+ *   - 그 밖에는 시계가 그냥 이어진다. 음량 0인 음을 지나는 동안에도.
+ */
+static void instrument_note(struct Channel *ch, const struct SfxNote *note)
+{
+    struct Instrument *in = &ch->inst;
+    if (in->sfx != note->instrument
+        || (note->key != in->trig_key && note->effect != FX_SLIDE)
+        || note->effect == FX_DROP || note->effect == FX_FADE_IN) {
+        in->sfx      = note->instrument;
+        in->offset   = 0.0;
+        in->prev_key = 24;
+        in->prev_vol = 0.0f;
+    }
+    in->trig_key = note->key;
+}
+
+/*
+ * instrument_sample(ch, inv_sr, freq, volume, wave, key) — one sample of
+ * the instrument.
+ *
+ * Plays the instrument of the channel one sample further and gives what it
+ * sounds like at that moment: its own note with its own effects.  Custom
+ * notes inside an instrument do not nest: they play as the plain waveform
+ * of their number.  Returns 0 when the instrument has nothing to play
+ * (it is over, or its note is silent).
+ *
+ * 채널의 악기를 샘플 하나만큼 진행하고 그 순간의 소리를 준다: 악기 자신의 음과
+ * 효과. 악기 안의 사용자 정의 음은 중첩되지 않고 같은 번호의 기본 파형으로
+ * 연주된다. 연주할 것이 없으면(끝났거나 음이 소리가 없으면) 0을 돌려준다.
+ */
+static int instrument_sample(struct Channel *ch, float inv_sr,
+                             float *freq, float *volume, int *wave, int *key)
+{
+    struct Instrument *in = &ch->inst;
+    int    sfx_id = in->sfx;
+    int    speed  = sfx_speed(sfx_id);
+    double offset_per_second = (double)PICO8_TICK_RATE / speed;
+    double offset = in->offset;
+    double next   = offset + offset_per_second * inv_sr;
+
+    int loop_start, loop_end;
+    sfx_loop(sfx_id, &loop_start, &loop_end);
+    int has_loop = loop_end > loop_start;
+    if (has_loop && next >= loop_end)
+        next = fmod(next - loop_start, (double)(loop_end - loop_start)) + loop_start;
+
+    int sounding = 0;
+    if (offset < (has_loop ? 32.0 : (double)sfx_last_note(sfx_id))) {
+        int note_id = (int)floor(offset);
+        struct SfxNote note;
+        sfx_get_note(sfx_id, note_id, &note);
+        if (note.volume > 0) {
+            note_effect(sfx_id, note_id, &note, offset, offset_per_second, speed,
+                        in->prev_key, in->prev_vol, freq, volume);
+            *wave = note.instrument;
+            *key  = note.key;
+            sounding = 1;
+        }
+        if ((int)floor(next) != note_id) {
+            in->prev_key = note.key;
+            in->prev_vol = note.volume / 7.0f;
+        }
+    }
+
+    /* Past the end the clock stops, so the instrument stays silent. */
+    in->offset = (has_loop || offset < 32.0) ? next : offset;
+    return sounding;
+}
+
+/*
  * update_sfx_state(ch, param, inv_sr) — advance a channel by one sample.
  *
  * Moves the channel one output sample forward and fills in the parameters
  * of the synthesizer for that sample: the instrument, the frequency, the
  * volume and the phase.
  *
- * The effects of a note are applied here as well: the slide, the
- * vibrato, the drop, the two fades and the two arpeggios.  The phase is
- * kept in the channel, so it runs on over the notes.
+ * The effects of a note are applied here as well (note_effect()).  A
+ * custom note plays its instrument instead (instrument_sample()), with
+ * the pitch of the note added to the pitch of the instrument and the
+ * volumes multiplied; the drop effect of a custom note only retriggers the
+ * instrument.  The phase is kept in the channel, so it runs on over the
+ * notes.
  *
  * The channel also decides when the sound is over: at the end of the
  * notes, at the loop end, or at the length that the caller gave.
@@ -275,8 +511,10 @@ static float pico8_wave(int instrument, double advance, float freq,
  * 채널을 출력 샘플 하나만큼 앞으로 보내고, 그 샘플의 신디사이저 파라미터(악기,
  * 주파수, 음량, 위상)를 채운다.
  *
- * 음의 효과도 여기서 적용된다. slide, vibrato, drop, 두 개의 fade, 두 개의
- * arp. 위상은 채널이 들고 있으므로 음이 바뀌어도 이어진다.
+ * 음의 효과도 여기서 적용된다(note_effect()). 사용자 정의 음은 대신 자기 악기를
+ * 연주한다(instrument_sample()). 음의 피치를 악기의 피치에 더하고 음량을 곱한다.
+ * 사용자 정의 음의 drop 효과는 악기를 다시 트리거하기만 한다. 위상은 채널이
+ * 들고 있으므로 음이 바뀌어도 이어진다.
  *
  * 채널은 소리가 언제 끝나는지도 정한다. 음표의 끝, 루프 끝, 아니면 호출한 쪽이
  * 준 길이에서 끝난다.
@@ -289,8 +527,8 @@ static void update_sfx_state(struct Channel *ch, struct SynthParam *param,
     int sfx_id = ch->sfx;
     int speed  = sfx_speed(sfx_id);
 
-    int    loop_start = ram_byte(PICO8_SFX_ADDR + sfx_id * AUDIO_SFX_SIZE + 66);
-    int    loop_end   = ram_byte(PICO8_SFX_ADDR + sfx_id * AUDIO_SFX_SIZE + 67);
+    int loop_start, loop_end;
+    sfx_loop(sfx_id, &loop_start, &loop_end);
     double offset_per_second = (double)PICO8_TICK_RATE / speed;
     double offset_per_sample = offset_per_second * inv_sr;
 
@@ -313,12 +551,7 @@ static void update_sfx_state(struct Channel *ch, struct SynthParam *param,
     if (loop_range <= 0) {
         has_end = 1;
         if (!ch->is_music) {
-            int last_note = 0;
-            for (int n = 0; n < AUDIO_SFX_NOTES; n++) {
-                struct SfxNote note;
-                sfx_get_note(sfx_id, n, &note);
-                if (note.volume > 0) last_note = (n + 1 < 32) ? n + 1 : 32;
-            }
+            int last_note = sfx_last_note(sfx_id);
             if (last_note < end_time) end_time = last_note;
         }
     }
@@ -332,49 +565,41 @@ static void update_sfx_state(struct Channel *ch, struct SynthParam *param,
         sfx_get_note(sfx_id, note_id, &note);
         ch->cur_note = note_id;
 
-        float volume = note.volume / 7.0f;
-        float freq = key_to_freq(note.key);
+        /* Every new note, silent or not, is shown to the instrument. */
+        int note_time = (int)floor(time);
+        if (note_time != ch->inst.last_note) {
+            ch->inst.last_note = note_time;
+            if (note.custom) instrument_note(ch, &note);
+            else             ch->inst.sfx = -1;
+        }
+
+        float freq, volume;
+        struct SfxNote outer = note;
+        if (note.custom && outer.effect == FX_DROP)
+            outer.effect = FX_NONE;            /* drop only retriggers */
+        note_effect(sfx_id, note_id, &outer, offset, offset_per_second, speed,
+                    ch->prev_key, ch->prev_vol, &freq, &volume);
+
+        int wave = note.instrument, key = note.key;
+        if (note.custom) {
+            float ifreq = 0.0f, ivol = 0.0f;
+            int iwave = 0, ikey = 24;
+            /* The instrument runs even while the outer note is silent. */
+            if (instrument_sample(ch, inv_sr, &ifreq, &ivol, &iwave, &ikey)) {
+                freq   = ifreq * freq / key_to_freq(24);
+                volume = ivol * volume;
+                wave   = iwave;
+                key    = ikey + note.key - 24;
+                if (key < 0) key = 0;
+                if (key > 63) key = 63;
+            } else {
+                volume = 0.0f;
+            }
+        }
 
         if (volume > 0.0f) {
-            switch (note.effect) {
-            case FX_NONE:
-                break;
-            case FX_SLIDE: {
-                double t = offset - floor(offset);
-                freq = (float)(key_to_freq(ch->prev_key) * (1.0 - t) + freq * t);
-                if (ch->prev_vol > 0.0f)
-                    volume = (float)(ch->prev_vol * (1.0 - t) + volume * t);
-                break;
-            }
-            case FX_VIBRATO: {
-                /* half a semitone, 7.5 cycles per note (measured) */
-                double t = fabs(fmod(7.5 * offset / offset_per_second, 1.0) - 0.5) - 0.25;
-                freq = (float)(freq * (1.0 - t) + freq * 1.059463094359 * t);
-                break;
-            }
-            case FX_DROP:
-                freq *= (float)(1.0 - (offset - floor(offset)));
-                break;
-            case FX_FADE_IN:
-                volume *= (float)(offset - floor(offset));
-                break;
-            case FX_FADE_OUT:
-                volume *= (float)(1.0 - (offset - floor(offset)));
-                break;
-            case FX_ARP_FAST:
-            case FX_ARP_SLOW: {
-                int m = (speed <= 8 ? 32 : 16) / (note.effect == FX_ARP_FAST ? 4 : 8);
-                int n = (int)(m * 7.5 * offset / offset_per_second);
-                int arp_note = (note_id & ~3) | (n & 3);
-                struct SfxNote an;
-                sfx_get_note(sfx_id, arp_note, &an);
-                freq = key_to_freq(an.key);
-                break;
-            }
-            }
-
-            param->instrument = note.instrument;
-            param->key        = note.key;
+            param->instrument = wave;
+            param->key        = key;
             param->freq       = freq;
             param->volume     = volume;
             param->is_music   = ch->is_music;
@@ -522,6 +747,7 @@ static void set_music_pattern(int pattern)
             channels[i].prev_vol   = 0.0f;
             channels[i].phi        = 0;
             channels[i].last_sample = 0.0f;
+            reset_instrument(&channels[i]);
         } else {
             channels[i].sfx_music = n & 0x3f;
         }
@@ -612,6 +838,7 @@ static void fill_buffer(float *buf, int samples)
                     ch->prev_vol  = 0.0f;
                     ch->phi       = 0;
                     ch->last_sample = 0.0f;
+                    reset_instrument(ch);
                 }
                 ch->sfx_music = -1;
             }
@@ -819,6 +1046,7 @@ void pico8_audio_sfx(int sfx_id, int channel, int offset, int length)
     ch->prev_vol   = 0.0f;
     ch->phi        = 0;
     ch->last_sample = 0.0f;
+    reset_instrument(ch);
 
     unlock_audio();
 }
@@ -959,3 +1187,79 @@ int pico8_audio_music_ticks(void)
  * song이 재생 중이면 1, 없으면 0.
  */
 int pico8_audio_music_playing(void) { return music_pattern != -1; }
+
+/* ------------------------------------------------------------------ */
+/*  WAV export                                                         */
+/* ------------------------------------------------------------------ */
+
+/* PICO-8 writes its .wav files at 22050Hz, 16 bit, mono, and a triangle at
+   full volume peaks at 16122 (measured).
+   PICO-8은 .wav를 22050Hz, 16비트, 모노로 쓰고, 최대 음량의 삼각파는
+   16122에서 정점을 찍는다(측정값). */
+#define WAV_RATE 22050
+#define WAV_GAIN (16122.0f / 0.5f)
+
+/*
+ * put_le(f, value, bytes) — write a little endian number.
+ *
+ * 리틀 엔디언 수를 쓴다.
+ */
+static void put_le(FILE *f, unsigned value, int bytes)
+{
+    for (int i = 0; i < bytes; i++) fputc((value >> (8 * i)) & 0xff, f);
+}
+
+/*
+ * pico8_audio_export_sfx_wav(sfx_id, path) — render a sound effect to a file.
+ *
+ * Plays the sound effect on a private channel, away from the four channels
+ * of the mixer, and writes what it sounds like as a .wav file the way
+ * PICO-8's "export foo.wav" does: 32 notes long, whatever the notes hold.
+ * Returns 0 on success and -1 when the file cannot be written.
+ *
+ * 효과음을 믹서의 네 채널과 떨어진 개인 채널에서 연주하고, 그 소리를 PICO-8의
+ * "export foo.wav"처럼 .wav 파일로 쓴다: 음이 무엇이든 32음 길이로.
+ * 성공하면 0, 파일을 쓸 수 없으면 -1을 돌려준다.
+ */
+int pico8_audio_export_sfx_wav(int sfx_id, const char *path)
+{
+    if (sfx_id < 0 || sfx_id >= 64) return -1;
+
+    int samples = AUDIO_SFX_NOTES * sfx_speed(sfx_id) * 183;
+    FILE *f = fopen(path, "wb");
+    if (!f) return -1;
+
+    fwrite("RIFF", 1, 4, f); put_le(f, 36 + samples * 2, 4);
+    fwrite("WAVEfmt ", 1, 8, f);
+    put_le(f, 16, 4); put_le(f, 1, 2); put_le(f, 1, 2);
+    put_le(f, WAV_RATE, 4); put_le(f, WAV_RATE * 2, 4);
+    put_le(f, 2, 2); put_le(f, 16, 2);
+    fwrite("data", 1, 4, f); put_le(f, samples * 2, 4);
+
+    struct Channel ch = CHANNEL_IDLE;
+    ch.sfx = sfx_id;
+    reset_instrument(&ch);
+    float inv_sr = 1.0f / WAV_RATE;
+
+    for (int i = 0; i < samples; i++) {
+        struct SynthParam param;
+        param.phi = ch.phi;
+        param.last_sample = ch.last_sample;
+        param.freq = 0.0f;
+        param.volume = 0.0f;
+        param.is_music = 0;
+        update_sfx_state(&ch, &param, inv_sr);
+
+        float out = 0.0f;
+        if (param.volume > 0.0f)
+            out = pico8_wave(param.instrument, param.phi, param.freq,
+                             &ch.last_sample, param.key) * param.volume * WAV_GAIN;
+        if (out > 32767.0f) out = 32767.0f;
+        if (out < -32768.0f) out = -32768.0f;
+        put_le(f, (unsigned)(int16_t)lrintf(out) & 0xffff, 2);
+    }
+
+    int ok = !ferror(f);
+    fclose(f);
+    return ok ? 0 : -1;
+}

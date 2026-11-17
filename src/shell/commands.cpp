@@ -735,16 +735,35 @@ static void cmd_import_shell(const std::string &arg, const std::string &)
 /*
  * cmd_export_shell(arg, arg2) — export a cart.
  *
- * PICO-8 can send a cart to the BBS.  pico-c cannot, so this only says
- * so and points at the command "save".
+ * Only the sound is supported: "export foo%d.wav" writes every sound effect
+ * to its own file (foo0.wav .. foo63.wav), like PICO-8 does, and
+ * "export foo.wav" writes sound effect 0 (the one PICO-8's editor has
+ * selected after a load).  The other formats (html, bin, png) are not
+ * available, and the command says so and points at "save".
  *
- * PICO-8은 카트를 BBS로 보낼 수 있다. pico-c는 할 수 없으므로 그것을
- * 말하고 "save" 명령을 가리킨다.
+ * 소리만 지원한다: "export foo%d.wav"는 PICO-8처럼 효과음마다 파일 하나씩
+ * (foo0.wav .. foo63.wav) 쓰고, "export foo.wav"는 효과음 0(로드 직후 PICO-8
+ * 편집기가 고르고 있는 것)을 쓴다. 다른 형식(html, bin, png)은 지원하지 않으므로
+ * 그렇게 말하고 "save"를 가리킨다.
  */
 static void cmd_export_shell(const std::string &arg, const std::string &)
 {
     if (arg.empty()) {
         shell_print_error("usage: export <filename>");
+        return;
+    }
+    if (util_has_suffix(arg, ".wav")) {
+        size_t pct = arg.find("%d");
+        int first = 0, last = pct == std::string::npos ? 0 : 63;
+        for (int n = first; n <= last; n++) {
+            std::string out = arg;
+            if (pct != std::string::npos) out.replace(pct, 2, std::to_string(n));
+            if (pico8_audio_export_sfx_wav(n, out.c_str()) != 0) {
+                shell_print_error("export: cannot write " + out);
+                return;
+            }
+        }
+        shell_print_info("exported " + arg);
         return;
     }
     shell_print("export: " + arg + " is not supported in pico-c", COL_TEXT);

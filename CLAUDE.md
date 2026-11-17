@@ -17,6 +17,7 @@ platforms/macos/test.sh                  # 골든 트랜스크립트 회귀 (PIC
 platforms/macos/test.sh cmp_all.p8       # 카트 하나만
 platforms/macos/oracle.sh                # 실제 PICO-8과 직접 비교
 platforms/macos/oracle.sh --record       # tests/expected/ 갱신 (오라클 출력으로)
+platforms/macos/oracle_audio.sh          # 오디오 스위트(tests/audio)를 PICO-8 .wav export와 비교 (--record로 갱신)
 make asan                                # AddressSanitizer 빌드
 ```
 
@@ -33,6 +34,12 @@ make asan                                # AddressSanitizer 빌드
 - 오라클은 `-x` 헤드리스 실행. 이 모드에서 `save()`는 조용히 무시되고 `info()`는 아무것도 안 찍는다.
 - 오라클의 상대 경로 기준은 `~/Library/Application Support/pico-8/carts/`.
 - 의도적 차이는 `tests/expected/divergences.txt`(KNOWN), 시계 같은 가변 필드는 `tests/expected/masks.txt`.
+- **소리 비교**: `-x`에서는 오디오가 안 돈다(`audio_rec`도 무음). 창 모드(`-windowed 1 -run`) +
+  카트의 `export("name_%d.wav")`로 효과음별 .wav(22050Hz)를 뽑는다. 반드시 `-home <임시폴더>`로
+  돌릴 것 — 사용자 config가 `sound_volume 0`이라 기본 홈에서는 무음이 나오고, 사용자 설정/카트도
+  건드리게 된다(`-volume` 같은 옵션은 config에 저장됨). `oracle_audio.sh`가 이 절차를 따른다.
+- 비교는 `tests/tools/wavnotes.py`(창별 피치 판독). PICO-8 export는 변화가 최대 1틱(183샘플) 늦고
+  시작 지연이 실행마다 달라서 창 앞 200샘플을 버리고 피치만 비교한다.
 
 ## 소스 구조
 
@@ -43,7 +50,7 @@ make asan                                # AddressSanitizer 빌드
 | `src/cart/` | 카트 I/O: `cart_read`(.p8/.p8.png 로드, `#include`, 소스 제한 검사), `cart_write`(.p8), `cart_png`(.p8.png 인코더), `cart_compress`(`:c:`/PXA 해제), `cart_data`, `cart_state`. 내부 헤더 `cart_internal.h` |
 | `src/shell/` | 부트 스플래시·콘솔(`console`), 명령 표(`commands.cpp`의 `kShellCommands`), 호스트 파일/폴더(`host`), 키 입력(`input`). 내부 헤더 `shell_internal.h` |
 | `src/vm.cpp` | Lua VM, 콜백 호출, 에러 블록 출력, `pico8_apply_parity()`(전역 API 패리티) |
-| `src/audio.cpp` | 신디사이저 + 뮤직 시퀀서 |
+| `src/audio.cpp` | 신디사이저 + 뮤직 시퀀서 + 커스텀 악기(`instrument_note`/`instrument_sample`) + `.wav` export |
 | `src/gfx.cpp` `src/input.cpp` `src/memory.cpp` | 화면/입력/RAM의 호스트 측 |
 | `src/charset.cpp` + `charset_table.inc` | charset 바이트 ↔ UTF-8 (생성기 `tools/gen_charset.py`) |
 | `src/font_table.inc` | 256글리프 비트맵 (생성기 `tools/gen_font.py`, 입력 `tools/font_dump.txt`) |
