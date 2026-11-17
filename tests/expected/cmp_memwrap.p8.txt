@@ -1,0 +1,7 @@
+poke wrap: 1 2 3 4 9
+poke2 edge: 7 8
+memset edge: 5 5 5 5
+peek4 edge: 0x0505.0505
+peek n edge: 0x0005.0000
+0x1234.5678
+0x0403.0201

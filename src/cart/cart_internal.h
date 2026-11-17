@@ -53,6 +53,12 @@ extern uint8_t     g_cart_rom[PICO8_CART_DATA_SIZE];
 /* The 32 metadata bytes that follow the code area in a .p8.png.  .p8.png의 메타데이터. */
 extern uint8_t     g_cart_logo[32];
 
+/* The label of the cart: the __label__ section, 128 lines of 128 characters
+   0-9a-v (colours 0..15, then 128..143), or empty when it has none.
+   카트의 라벨: __label__ 섹션(128자 128줄, 0-9a-v = 색 0..15, 128..143).
+   없으면 비어 있다. */
+extern std::string g_cart_label;
+
 /* ------------------------------------------------------------------ *
  *  The helpers that more than one file needs
  * ------------------------------------------------------------------ */
@@ -71,7 +77,8 @@ int  decompress_pxa(const uint8_t *src, uint8_t *dest, uint32_t maxlen);
 
 /* Fill the data area from the text of a .p8 file.  .p8 파일의 텍스트로 데이터 영역을 채운다. */
 int  parse_p8_text(const char *text, size_t textlen,
-                   uint8_t *cart_data, std::string &code);
+                   uint8_t *cart_data, std::string &code,
+                   std::string *label = nullptr);
 
 /* Write a cart as a .p8 file.  카트를 .p8 파일로 쓴다. */
 int  cart_write_p8(const char *path, const uint8_t *rom,

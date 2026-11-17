@@ -381,7 +381,9 @@ PICO-8은 카트의 `__lua__` 소스가 **65536바이트를 넘거나 토큰이 
   - [~] `keyconfig` — 안내 메시지만. 버튼 리맵 저장 미구현
   - [~] `splore` — 온라인 브라우저는 범위 밖, 로컬 `load` 안내만
 - [x] **문법 에러 문구 패리티** — 완료 (2026-11-17, §9-4)
-- [x] **extcmd 캡처, serial** — 완료 (2026-11-17, §9-4). `label`, gif(`rec`/`video`)는 미구현
+- [x] **extcmd 캡처, serial** — 완료 (2026-11-17, §9-4). `label`, gif는 §10에서 완료
+- [x] **CI, 실제 게임 호환성, 라벨/gif, 경고 정리** — 완료 (2026-11-17, §10)
+- [x] **잠재 버그 수정** (셸 카트 상태, import) — 완료 (2026-11-17, §11)
 - [ ] (방해 요소) `/Applications/PICO-8.app` 자체가 멈춤 — /tmp/p8app 사본 사용 유지
 
 ---
@@ -640,6 +642,82 @@ bit0 편집 모드(소리 무관), bit1 noiz, bit2 buzz, detune = (b/8)%3, rever
 
 ### 9-6. 남은 것
 
-- 셸: `keyconfig`(UI 필요), `splore`/BBS(온라인), html/bin export, `extcmd("label")`(라벨 보관이 필요), gif 녹화.
+- 셸: `keyconfig`(UI 필요), `splore`/BBS(온라인), html/bin export.
 - 노이즈 메커니즘(11025Hz 쌍, 양자화, 클램프) 자체의 재현, PICO-8 export 시작 지연.
-- `api_gfx.cpp:1336`, `api_memory.cpp`, `vm.cpp`의 기존 컴파일 경고.
+- (§10에서 처리: 라벨, gif, 컴파일 경고)
+
+---
+
+## 10. CI, 실제 게임 호환성, 캡처, 경고 (2026-11-17, 브랜치 `feat/ci-compat-capture`)
+
+### 10-1. CI
+
+- `.github/workflows/test.yml`: Linux(apt `libsdl2-dev`)와 macOS(Homebrew `sdl2`, `SDL2_DIR`)에서
+  새 체크아웃 → `build.sh` → `test.sh`. z8lua 클론 + 패치 적용까지 검증된다.
+- `build_common.sh`의 macOS 분기가 `SDL2_DIR`을 받도록(기본 MacPorts `/opt/local`).
+- 이 기기에는 Docker가 없어 **CI는 브랜치를 푸시해야 처음 실행된다**(로컬 검증 불가).
+
+### 10-2. 실제 게임 카트 (몽키 테스트)
+
+- `pico-c -headless -frames N -autoplay SEED cart`: 시드로 정해지는 무작위 버튼 입력(4..34프레임마다
+  새 조합, 대부분 O/X 포함)으로 게임을 타이틀 너머까지 진행. 벤치 줄에 `stopped by an error` 표시.
+- `test_carts/`의 게임 7종을 5분(게임 시간)씩 시드 3~5개로 돌려 찾은 **pico-c 버그** (전부 오라클 실측으로 수정):
+  - **tinyhawk** `line(x,y)` 2인자: 마지막 끝점(0x5f3c/0x5f3e)에서 이어 그림, `line(x,y,c)`도 같음,
+    `line()`은 끝점을 잊음(0x5f35=1 → 다음 호출은 시작점만 설정). 부팅 시 끝점 (0,0) 유효.
+  - **delunky** `del(nil, x)`: PICO-8은 오류 없이 값 0개. `add/count/deli`도 nil이면 값 0개.
+  - **celeste** `foreach` 중 원소 삭제: PICO-8의 순회는 "현재 칸이 직전 값과 같을 때만 전진, 구멍 건너뜀"
+    → 현재 원소를 지워도 다음 원소를 건너뛰지 않음, 뒤에 추가한 원소도 방문.
+  - 부수 발견: `del`은 **첫 번째** 일치만 지우고 그 값을 반환(기존: 모두 지움), `add`는 값을 반환하고
+    `add(t,v,i)` 삽입 지원(범위 밖은 `position out of bounds`), `count(t,v)`는 문자열/소수도 비교.
+  - 색 인자를 받은 모든 도형이 그 색을 드로우 색(0x5f25, 바이트 전체)으로 남김.
+- 게임 쪽 문제로 판정: **picodriller** 시드 4 — 크레딧 메뉴를 여는 같은 프레임에 위를 누르면 설명 없는
+  항목으로 이동(카트 코드 버그, PICO-8에서도 같음. 메뉴 파싱 결과가 PICO-8과 동일함을 확인).
+  **celeste_v2**는 코드 영역이 `load fail` 텍스트뿐인 깨진 파일, **solitomb**은 없는 카트(`solitomb_title`)를 로드.
+- 수정 후 6종 × 시드 3~5개, 각 5분 동안 오류 0.
+
+### 10-3. 숨은 팔레트 (128..143)
+
+- 렌더러가 화면 팔레트의 상위 비트를 버려서 `pal(c, 128+n, 1)`이 기본 색으로 보였다.
+- 실측 규칙: 표시 색 = `값 & 0x8f`(7번 비트 = 숨은 색, 4..6번 비트 무시). `pal(...,1)`과 `pal(...,2)`는
+  바이트 전체 저장, 세컨더리 팔레트는 RAM 0x5f60(기존: 별도 버퍼)에 있음.
+- `pico8_palette_ext` + `pico8_display_rgb()`(pico8_core.h). 스크린샷이 PICO-8과 픽셀 동일.
+
+### 10-4. 라벨과 gif
+
+- `extcmd("label")`: 화면(화면 팔레트 거침, 숨은 색은 g..v)을 라벨로. `__label__`(128×128자, `__gff__` 뒤
+  `__map__` 앞)로 저장: `save()`/쓰기 경로는 `cart_write_p8`, 셸 `save`(원문 유지)는
+  `pico8_cart_splice_label()`로 섹션을 교체/삽입. `.p8` 로드 시 라벨 보존. `.p8.png` 라벨 그림은 미구현.
+  PICO-8은 실행 중 카트의 `save()`를 무시해 파일 형식을 오라클로 확인할 수 없었다(문서 형식을 따름).
+- `extcmd("rec")` / `extcmd("video")`: `src/video.cpp`. 카트가 그린 프레임을 32색 번호로 16초 링 버퍼에
+  보관, `video`는 `rec` 이후(없으면 최근 8초)를 3배 크기 gif(32색 전역 색표, LZW)로. 프레임 간격은
+  30fps면 3/4cs 교대. 독립 디코더로 풀어 같은 프레임 스크린샷과 픽셀 동일 확인.
+
+### 10-5. 경고 정리 → 메모리 버그 2개
+
+- 경고 9개 제거. `api_memory.cpp`의 "항상 거짓" 비교를 고치며 실측:
+  - **주소는 64KB에서 되돌아감**: `poke(0xfffe,1,2,3,4)`는 0,1번지에 이어 씀, `poke2(0xffff)`의 상위 바이트는 0번지,
+    `memset`/`peek4`/`memcpy`도 되돌아감(기존: 중간에 멈추거나 nil).
+  - **`peek4`/`poke4`가 소수부를 잃고 있었음**: 32비트를 정수로 변환하던 것을 16.16 원시 비트로
+    (`poke4(a,0x1234.5678)` → `peek4` 동일, 바이트 1,2,3,4 → `0x0403.0201`).
+
+### 10-6. 결과
+
+`test.sh` **103 passed**(트랜스크립트 54 + 오디오 49), `oracle.sh` 52 MATCH + 2 KNOWN, 경고 0.
+새 회귀 카트: `cmp_tables`, `cmp_line_pen`, `cmp_palette`, `cmp_memwrap`.
+
+---
+
+## 11. 잠재 버그 수정 (2026-11-17)
+
+- **셸의 카트 이름/소스가 파일마다 따로 있었음**: `shell_internal.h`가 `g_cart_name`/`g_source`를
+  `static`으로 정의해서 host.cpp(불러올 때 씀), console.cpp, commands.cpp(읽음)가 각자 사본을 가졌다.
+  그래서 명령들은 늘 빈 값을 봤다: `backup()`은 "no editable source"로 조용히 실패, 이름 없는 `save`는
+  빈 이름으로, `info`/`edit`도 영향. → 헤더는 `extern`, 정의는 console.cpp 하나.
+- **카트 정체를 실행 뒤에 정하고 있었음**: `pico8_console_load`가 소스를 카트 최상위 코드 실행 *후*에
+  읽어서, 최상위에서 부른 셸 명령(`backup()` 등)이 소스를 못 봤다. → 경로·이름·텍스트·`g_has_cart`를
+  실행 전에 정하고 실패하면 되돌림. 짧게 읽힌 파일의 크기 처리 버그(`resize(sz)` → 읽은 만큼)도 수정.
+- **실행 중 `import()`가 카트 ROM을 안 바꿨음**: PICO-8은 상대 경로의 그림을 RAM과 카트 ROM에 모두
+  넣는다(`reload()` 뒤에도 남음). 앞서 "PICO-8은 RAM을 안 바꾼다"고 본 것은 절대 경로를 PICO-8이
+  찾지 못했기 때문이었다. 같은 그라데이션에서 체크섬(-21079)이 PICO-8과 같아 **색 매칭도 일치** 확인.
+  회귀 `cmp_import.p8` + `import_grad.png`(오라클은 자기 카트 폴더에서 찾으므로 KNOWN, 기대값은 실측).
+- 결과: `test.sh` **104 passed**, `oracle.sh` 52 MATCH + 3 KNOWN.

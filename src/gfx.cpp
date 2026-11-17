@@ -379,8 +379,7 @@ void pico8_render_screen(uint32_t *pixels, int pitch, int scale_w)
             uint8_t byte = pico8_ram[addr];
             uint8_t col_idx = (x & 1) ? (byte >> 4) : (byte & 0x0f);
 
-            uint8_t screen_pal = pico8_ram[PICO8_DRAW_STATE + 0x10 + col_idx] & 0x0f;
-            uint32_t rgb = pico8_palette[screen_pal];
+            uint32_t rgb = pico8_display_rgb(pico8_ram[PICO8_DRAW_STATE + 0x10 + col_idx]);
 
             for (int sy = 0; sy < scale_w; sy++) {
                 for (int sx = 0; sx < scale_w; sx++) {

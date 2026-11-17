@@ -20,6 +20,7 @@ platforms/macos/oracle.sh --record       # tests/expected/ 갱신 (오라클 출
 platforms/macos/oracle_audio.sh          # 오디오 스위트(tests/audio)를 PICO-8 .wav export와 비교 (--record로 갱신)
 make asan                                # AddressSanitizer 빌드
 ./build/macos/pico-c -headless -frames 1800 cart.p8   # 벤치마크(프레임당 평균/최악 ms)
+./build/macos/pico-c -headless -frames 18000 -autoplay 1 game.p8   # 몽키 테스트(무작위 입력, 오류 탐지)
 ```
 
 - 첫 빌드 시 `make`가 z8lua를 `platforms/common/deps/z8lua`로 git clone (네트워크 필요).
@@ -62,7 +63,9 @@ make asan                                # AddressSanitizer 빌드
 | `src/pxa.cpp` | 공식 PXA 압축기 이식 |
 | `src/tokens.cpp` | 8192 토큰 카운터 (파서와 독립된 렉서) |
 | `src/util.{h,cpp}` | 공용 문자열/경로/16진수 헬퍼 |
-| `src/main.cpp` | 호스트 루프: 창, 이벤트, 프레임 타이밍 |
+| `src/main.cpp` | 호스트 루프: 창, 이벤트, 프레임 타이밍, 헤드리스 벤치/autoplay |
+| `src/video.cpp` | gif 녹화(`extcmd("rec"/"video")`): 프레임 링 버퍼 + GIF/LZW 인코더 |
+| `.github/workflows/test.yml` | CI: Linux/macOS에서 새 체크아웃 빌드 + `test.sh` |
 
 Makefile은 `src/*.cpp`와 `src/*/*.cpp`를 와일드카드로 잡으므로 **새 파일 추가 시 Makefile 수정 불필요**
 (단, 하위 폴더는 한 단계까지만).

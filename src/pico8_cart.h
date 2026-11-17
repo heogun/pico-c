@@ -50,6 +50,15 @@ const char *pico8_cart_get_path(void);
 const uint8_t *pico8_cart_rom(void);
 
 /*
+ * Copy `len` bytes of the RAM at `addr` into the same place of the cart ROM
+ * (the image reload() reads), e.g. after "import foo.png".
+ *
+ * RAM의 `addr`부터 `len` 바이트를 카트 ROM(reload()가 읽는 이미지)의 같은
+ * 자리에 복사한다. 예: "import foo.png" 뒤.
+ */
+void pico8_cart_rom_store(int addr, int len);
+
+/*
  * Number of PICO-8 tokens in a Lua source buffer, matching the count the
  * oracle reports when a cart exceeds the 8192-token limit.
  *
@@ -86,6 +95,18 @@ int pico8_cart_save_rom_png(const char *path);
  * `width`개씩 0x00RRGGBB를 담는다. 성공하면 0, 실패하면 -1.
  */
 int pico8_png_write(const char *path, const uint32_t *pixels, int width, int height);
+
+/*
+ * extcmd("label"): make the screen the label of the cart, which "save" and
+ * save() then write as the __label__ section.  pico8_cart_splice_label()
+ * puts it into the text of a .p8 file that is saved as it was read.
+ *
+ * extcmd("label"): 화면을 카트의 라벨로 삼는다. "save"와 save()가 그것을
+ * __label__ 섹션으로 쓴다. pico8_cart_splice_label()은 읽은 그대로 저장하는
+ * .p8 텍스트에 라벨을 넣는다.
+ */
+void        pico8_cart_capture_label(void);
+std::string pico8_cart_splice_label(const std::string &text);
 
 /*
  * Read only a cartridge's data area (0x4300 bytes) without touching RAM.

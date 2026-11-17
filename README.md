@@ -101,8 +101,19 @@ it prints the average and the worst time of an update + draw:
 ./build/macos/pico-c -headless -frames 1800 mycart.p8
 ```
 
-Screenshots (`extcmd("screen")`) and audio recordings (`extcmd("audio_rec")`
-/ `extcmd("audio_end")`) are saved in `$PICO_C_DESKTOP`, or `~/Desktop`.
+Screenshots (`extcmd("screen")`), gifs (`extcmd("rec")` / `extcmd("video")`)
+and audio recordings (`extcmd("audio_rec")` / `extcmd("audio_end")`) are
+saved in `$PICO_C_DESKTOP`, or `~/Desktop`.
+
+To play a game without a person at the controls (to look for crashes),
+`-autoplay SEED` presses buttons at random, the same way for the same seed:
+
+```sh
+./build/macos/pico-c -headless -frames 18000 -autoplay 1 mygame.p8
+```
+
+The suite also runs on GitHub Actions for Linux and macOS
+(`.github/workflows/test.yml`).
 
 ## Source layout
 

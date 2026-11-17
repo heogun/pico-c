@@ -165,6 +165,33 @@ static const uint32_t pico8_palette[PICO8_PAL_COUNT] = {
     0x29adff, 0x83769c, 0xff77a8, 0xffccaa,
 };
 
+/*
+ * The 16 "secret" colours 128..143, which only the screen palette can show
+ * (pal(c, 128 + n, 1)).
+ *
+ * 화면 팔레트로만 보이는 16개의 "숨은" 색 128..143 (pal(c, 128 + n, 1)).
+ */
+static const uint32_t pico8_palette_ext[PICO8_PAL_COUNT] = {
+    0x291814, 0x111d35, 0x422136, 0x125359,
+    0x742f29, 0x49333b, 0xa28879, 0xf3ef7d,
+    0xbe1250, 0xff6c24, 0xa8e72e, 0x00b543,
+    0x065ab5, 0x754665, 0xff6e59, 0xff9d81,
+};
+
+/*
+ * The RGB colour of a screen palette entry.  PICO-8 keeps bit 7 (the
+ * secret colours) and the low four bits and ignores bits 4..6 (measured:
+ * 0x1c shows colour 12, 0x9c and 0xfc show 140).
+ *
+ * 화면 팔레트 항목의 RGB 색. PICO-8은 7번 비트(숨은 색)와 하위 4비트만 보고
+ * 4..6번 비트는 무시한다(실측: 0x1c는 12번 색, 0x9c와 0xfc는 140번 색).
+ */
+static inline uint32_t pico8_display_rgb(uint8_t entry)
+{
+    return (entry & 0x80) ? pico8_palette_ext[entry & 0x0f]
+                          : pico8_palette[entry & 0x0f];
+}
+
 /* ------------------------------------------------------------------ *
  *  Memory
  * ------------------------------------------------------------------ */

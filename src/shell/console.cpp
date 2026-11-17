@@ -40,9 +40,14 @@ int                       g_hist_pos = -1;
 std::string               g_draft;
 
 /* The cart that is loaded.  올라와 있는 카트. */
+/* (one definition for every file of the shell: they used to be "static" in
+   shell_internal.h, which gave each file a copy of its own, so the commands
+   never saw the cart that host.cpp had loaded)
+   (셸의 모든 파일이 쓰는 정의 하나. 예전에는 shell_internal.h에서 "static"이라
+   파일마다 따로 있었고, 그래서 명령들은 host.cpp가 불러온 카트를 보지 못했다) */
 extern std::string               g_cart_path;
-extern std::string               g_cart_name;
-extern std::string               g_source;
+std::string               g_cart_name;
+std::string               g_source;
 int                       g_has_cart = 0;
 
 /* The frame counter, used for the blinking cursor.  깜빡이는 커서용. */

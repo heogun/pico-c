@@ -43,6 +43,7 @@ uint8_t     g_cart_rom[PICO8_CART_DATA_SIZE];
    stamp and a SHA1 of the preceding 0x8000 bytes. Preserved so a loaded
    cart's stamp is written back unchanged. */
 uint8_t     g_cart_logo[32];
+std::string g_cart_label;
 
 /*
  * cart_snapshot_rom() — remember the data area of the cart.
@@ -114,3 +115,76 @@ const char *pico8_cart_get_path(void)      { return g_cart_path.c_str(); }
  * 여기서 복사하고, cstore()는 여기로 쓴다.
  */
 const uint8_t *pico8_cart_rom(void)        { return g_cart_rom; }
+
+/*
+ * pico8_cart_rom_store(addr, len) — copy part of the RAM into the cart ROM.
+ *
+ * Only the data area (below 0x4300) has a ROM behind it.
+ *
+ * RAM 일부를 카트 ROM에 복사한다. ROM이 있는 곳은 데이터 영역(0x4300 아래)뿐이다.
+ */
+void pico8_cart_rom_store(int addr, int len)
+{
+    if (addr < 0) { len += addr; addr = 0; }
+    if (addr + len > PICO8_CART_DATA_SIZE) len = PICO8_CART_DATA_SIZE - addr;
+    if (len > 0) memcpy(g_cart_rom + addr, pico8_ram + addr, (size_t)len);
+}
+
+/*
+ * pico8_cart_capture_label() — make the screen the label of the cart.
+ *
+ * extcmd("label").  Every pixel goes through the screen palette, so a
+ * secret colour (128..143) is kept as one (the digits g..v).
+ *
+ * extcmd("label"). 픽셀마다 화면 팔레트를 거치므로 숨은 색(128..143)도 그대로
+ * (g..v) 남는다.
+ */
+void pico8_cart_capture_label(void)
+{
+    static const char kDigits[] = "0123456789abcdefghijklmnopqrstuv";
+    g_cart_label.clear();
+    g_cart_label.reserve(128 * 129);
+    for (int y = 0; y < PICO8_SCREEN_H; y++) {
+        for (int x = 0; x < PICO8_SCREEN_W; x++) {
+            uint8_t b = pico8_ram[PICO8_SCREEN + y * 64 + (x >> 1)];
+            uint8_t c = (x & 1) ? (b >> 4) : (b & 0x0f);
+            uint8_t e = pico8_ram[PICO8_DRAW_STATE + 0x10 + c];
+            g_cart_label += kDigits[(e & 0x0f) + ((e & 0x80) ? 16 : 0)];
+        }
+        g_cart_label += '\n';
+    }
+}
+
+/*
+ * pico8_cart_splice_label(text) — put the label into the text of a .p8 file.
+ *
+ * Replaces the __label__ section of the text, or adds one before the
+ * __map__, __sfx__ or __music__ section (or at the end), which is where
+ * PICO-8 writes it.  Without a label the text is returned as it is.
+ *
+ * .p8 파일 텍스트의 __label__ 섹션을 바꾸거나, PICO-8이 쓰는 자리인 __map__,
+ * __sfx__, __music__ 섹션 앞(없으면 끝)에 넣는다. 라벨이 없으면 텍스트를 그대로
+ * 돌려준다.
+ */
+std::string pico8_cart_splice_label(const std::string &text)
+{
+    if (g_cart_label.empty()) return text;
+    std::string section = "__label__\n" + g_cart_label;
+
+    size_t at = text.find("\n__label__");
+    if (at != std::string::npos) {
+        size_t start = at + 1;
+        size_t end = text.find("\n__", start + 9);
+        end = (end == std::string::npos) ? text.size() : end + 1;
+        return text.substr(0, start) + section + text.substr(end);
+    }
+    static const char *const kAfter[] = { "\n__map__", "\n__sfx__", "\n__music__" };
+    for (const char *mark : kAfter) {
+        size_t pos = text.find(mark);
+        if (pos != std::string::npos)
+            return text.substr(0, pos + 1) + section + text.substr(pos + 1);
+    }
+    std::string out = text;
+    if (!out.empty() && out.back() != '\n') out += '\n';
+    return out + section;
+}

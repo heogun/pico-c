@@ -1,0 +1,23 @@
+start 5f35=0 5f3c=0 5f3e=0
+first line(x,y,c): 8 8 8
+then line(x,y): 8 8
+after 5f35=0 5f3c=9 5f3e=5
+full 5f35=0 5f3c=30 5f3e=40
+reset 5f35=1 5f3c=30 5f3e=40
+poked start: 9 9
+line2: 0 8 0
+line3: 12 12 7
+line0: 0 0
+pset 5f25=8
+pget 5f25=6
+line 5f25=9
+rect 5f25=10
+rectfill 5f25=11
+circ 5f25=12
+circfill 5f25=13
+oval 5f25=14
+ovalfill 5f25=15
+rrect 5f25=4
+print 5f25=3
+cls 5f25=6
+rect hi 5f25=24

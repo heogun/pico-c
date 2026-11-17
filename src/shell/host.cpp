@@ -185,24 +185,8 @@ int pico8_console_load(const char *path)
     if (!path)
         return -1;
 
-    /* Set the current cart identity *before* running the cart, because the
-       cart's top-level code runs during pico8_load_cart() and may call
-       run()/load()/extcmd("reset"), which need the current cart path. */
-    std::string prev_path = g_cart_path;
-    std::string prev_name = g_cart_name;
-    g_cart_path = path;
-    g_cart_name = util_path_base(path);
-
-    if (pico8_load_cart(path) != 0) {
-        g_cart_path = prev_path;
-        g_cart_name = prev_name;
-        return -1;
-    }
-
-    g_has_cart = 1;
-    g_source.clear();
-
     /* Keep the text of plain .p8 carts so "save" can round-trip it. */
+    std::string text;
     FILE *f = fopen(path, "rb");
     if (f) {
         unsigned char magic[4] = {0};
@@ -214,12 +198,37 @@ int pico8_console_load(const char *path)
             long sz = ftell(f);
             fseek(f, 0, SEEK_SET);
             if (sz > 0 && sz < 1024 * 1024) {
-                g_source.resize((size_t)sz);
-                if (fread(&g_source[0], 1, (size_t)sz, f) != (size_t)sz)
-                    g_source.resize((size_t)sz);
+                text.resize((size_t)sz);
+                text.resize(fread(&text[0], 1, (size_t)sz, f));
             }
         }
         fclose(f);
+    }
+
+    /* Set the whole identity of the cart (path, name, text) *before* it
+       runs: its top-level code runs inside pico8_load_cart() and may call
+       run(), load(), extcmd("reset") or a shell command such as backup(),
+       which all need to know the current cart.  A failed load puts the
+       previous cart back.
+       카트의 정체(경로, 이름, 텍스트)를 실행 *전에* 모두 정한다. 최상위 코드는
+       pico8_load_cart() 안에서 돌고, run(), load(), extcmd("reset"), backup()
+       같은 셸 명령을 부를 수 있는데, 모두 현재 카트를 알아야 한다. 불러오기에
+       실패하면 이전 카트로 되돌린다. */
+    std::string prev_path = g_cart_path;
+    std::string prev_name = g_cart_name;
+    std::string prev_source = g_source;
+    int prev_has = g_has_cart;
+    g_cart_path = path;
+    g_cart_name = util_path_base(path);
+    g_source = text;
+    g_has_cart = 1;
+
+    if (pico8_load_cart(path) != 0) {
+        g_cart_path = prev_path;
+        g_cart_name = prev_name;
+        g_source = prev_source;
+        g_has_cart = prev_has;
+        return -1;
     }
     return 0;
 }

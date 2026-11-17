@@ -240,8 +240,9 @@ static void cmd_save(const std::string &arg, const std::string &)
     if (!g_source.empty() && g_source.find("pico-8 cartridge") != std::string::npos) {
         FILE *f = fopen(out.c_str(), "wb");
         if (!f) { shell_print_error("save: cannot write " + out); return; }
-        fwrite(g_source.data(), 1, g_source.size(), f);
-        if (g_source.back() != '\n') fputc('\n', f);
+        std::string text = pico8_cart_splice_label(g_source);
+        fwrite(text.data(), 1, text.size(), f);
+        if (text.back() != '\n') fputc('\n', f);
         fclose(f);
         shell_print_info("saved " + out);
         return;
@@ -754,13 +755,16 @@ static int nearest_colour(int r, int g, int b)
 /*
  * cmd_import_shell(arg, arg2) — import a file into the cart.
  *
- * "import foo.png" reads a picture into the spritesheet: the top left
- * 128x128 pixels, every pixel turned into the closest of the 16 colours.
- * Other files (a cart from the BBS, ...) are not supported.
+ * "import foo.png" reads a picture into the spritesheet of the cart (the
+ * RAM and the cart ROM, so reload() keeps it): the top left 128x128 pixels,
+ * every pixel turned into the closest of the 16 colours (the same mapping
+ * as PICO-8: a 128x128 gradient gives the same sheet).  Other files (a
+ * cart from the BBS, ...) are not supported.
  *
- * "import foo.png"는 그림을 스프라이트 시트로 읽는다: 왼쪽 위 128x128 픽셀을,
- * 픽셀마다 16색 중 가장 가까운 색으로 바꿔서. 다른 파일(BBS의 카트 등)은
- * 지원하지 않는다.
+ * "import foo.png"는 그림을 카트의 스프라이트 시트로 읽는다(RAM과 카트 ROM,
+ * 그래서 reload() 뒤에도 남는다): 왼쪽 위 128x128 픽셀을, 픽셀마다 16색 중
+ * 가장 가까운 색으로 바꿔서(PICO-8과 같은 대응: 128x128 그라데이션이 같은 시트가
+ * 된다). 다른 파일(BBS의 카트 등)은 지원하지 않는다.
  */
 static void cmd_import_shell(const std::string &arg, const std::string &)
 {
@@ -780,6 +784,10 @@ static void cmd_import_shell(const std::string &arg, const std::string &)
                 b = (x & 1) ? (uint8_t)((b & 0x0f) | (c << 4)) : (uint8_t)((b & 0xf0) | c);
             }
         stbi_image_free(img);
+        /* PICO-8 changes the cart itself, so reload() keeps the picture
+           (measured).  PICO-8은 카트 자체를 바꾸므로 reload() 뒤에도 그림이
+           남는다(실측). */
+        pico8_cart_rom_store(0, 0x2000);
         shell_print_info("imported " + arg);
         return;
     }
