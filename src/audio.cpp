@@ -842,6 +842,8 @@ static float voice(int wave, double phase, int buzz, float freq,
 static float channel_sample(struct Channel *ch, float inv_sr, int *is_music)
 {
     struct SynthParam param;
+    param.instrument  = 0;
+    param.key         = 0;
     param.phi         = ch->phi;
     param.last_sample = ch->last_sample;
     param.freq        = 0.0f;
