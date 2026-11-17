@@ -11,6 +11,15 @@
 #include <ctype.h>
 #include <string.h>
 
+#include <filesystem>
+#include <system_error>
+
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 #include "util.h"
 
 /*
@@ -113,4 +122,106 @@ bool util_is_hex_digit(int c)
     return (c >= '0' && c <= '9') ||
            (c >= 'a' && c <= 'f') ||
            (c >= 'A' && c <= 'F');
+}
+
+/* ------------------------------------------------------------------ *
+ *  The host system
+ * ------------------------------------------------------------------ */
+
+namespace fs = std::filesystem;
+
+bool util_list_dir(const std::string &dir, std::vector<UtilDirEntry> &out)
+{
+    std::error_code ec;
+    fs::directory_iterator it(fs::u8path(dir), ec), end;
+    if (ec) return false;
+    for (; it != end; it.increment(ec)) {
+        if (ec) break;
+        std::string name = it->path().filename().u8string();
+        if (name.empty() || name[0] == '.') continue;
+        std::error_code ec2;
+        out.push_back({ name, it->is_directory(ec2) });
+    }
+    return true;
+}
+
+bool util_is_dir(const std::string &path)
+{
+    std::error_code ec;
+    return fs::is_directory(fs::u8path(path), ec);
+}
+
+bool util_is_file(const std::string &path)
+{
+    std::error_code ec;
+    return fs::is_regular_file(fs::u8path(path), ec);
+}
+
+std::string util_cwd(void)
+{
+    std::error_code ec;
+    fs::path p = fs::current_path(ec);
+    return ec ? std::string(".") : p.u8string();
+}
+
+bool util_chdir(const std::string &path)
+{
+    std::error_code ec;
+    fs::current_path(fs::u8path(path), ec);
+    return !ec;
+}
+
+bool util_make_dir(const std::string &path, bool parents)
+{
+    std::error_code ec;
+    if (parents) {
+        fs::create_directories(fs::u8path(path), ec);
+        return !ec && util_is_dir(path);
+    }
+    return fs::create_directory(fs::u8path(path), ec) && !ec;
+}
+
+FILE *util_popen(const char *command, const char *mode)
+{
+#if defined(_WIN32)
+    return _popen(command, mode);
+#else
+    return popen(command, mode);
+#endif
+}
+
+int util_pclose(FILE *f)
+{
+#if defined(_WIN32)
+    return _pclose(f);
+#else
+    return pclose(f);
+#endif
+}
+
+bool util_stdin_is_terminal(void)
+{
+#if defined(_WIN32)
+    return _isatty(_fileno(stdin)) != 0;
+#else
+    return isatty(fileno(stdin)) != 0;
+#endif
+}
+
+bool util_local_time(time_t t, struct tm *out)
+{
+#if defined(_WIN32)
+    return localtime_s(out, &t) == 0;
+#else
+    return localtime_r(&t, out) != NULL;
+#endif
+}
+
+bool util_utc_time(time_t t, struct tm *out)
+{
+#if defined(_WIN32)
+    return gmtime_s(out, &t) == 0;
+#else
+    return gmtime_r(&t, out) != NULL;
+#endif
 }

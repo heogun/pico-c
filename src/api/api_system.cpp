@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "api_internal.h"
+#include "util.h"
 
 /*
  * time() — the number of frames since the cart started.
@@ -100,8 +101,6 @@ static int pico8_extcmd(lua_State *L)
     return 0;
 }
 
-#include <dirent.h>
-#include <sys/stat.h>
 
 /*
  * reboot() — restart the machine.
@@ -168,25 +167,17 @@ static int pico8_ls(lua_State *L)
         dir = lua_tostring(L, 1);
 
     lua_newtable(L);
-    DIR *d = opendir(dir);
-    if (!d) return 1;
+    std::vector<UtilDirEntry> entries;
+    if (!util_list_dir(dir ? dir : ".", entries)) return 1;
 
     int idx = 1;
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-        std::string name = ent->d_name;
-        bool is_dir = false;
-        struct stat st;
-        std::string full = std::string(dir) + "/" + name;
-        if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) is_dir = true;
-        bool is_p8 = (name.rfind(".p8", name.size()-3) == name.size()-3) ||
-                     (name.rfind(".p8.png", name.size()-7) == name.size()-7);
-        if (!is_dir && !is_p8) continue;
-        lua_pushstring(L, (name + (is_dir ? "/" : "")).c_str());
+    for (const UtilDirEntry &e : entries) {
+        const std::string &name = e.name;
+        bool is_p8 = util_has_suffix(name, ".p8") || util_has_suffix(name, ".p8.png");
+        if (!e.is_dir && !is_p8) continue;
+        lua_pushstring(L, (name + (e.is_dir ? "/" : "")).c_str());
         lua_rawseti(L, -2, idx++);
     }
-    closedir(d);
     return 1;
 }
 
@@ -355,11 +346,11 @@ static void pico8_stat_clipboard(lua_State *L)
 #else
     const char *cmd = "xclip -selection clipboard -o 2>/dev/null";
 #endif
-    FILE *f = popen(cmd, "r");
+    FILE *f = util_popen(cmd, "r");
     if (f) {
         size_t n = fread(buf, 1, sizeof(buf) - 1, f);
         buf[n] = '\0';
-        pclose(f);
+        util_pclose(f);
         /* pbpaste / Get-Clipboard append a trailing newline. */
         while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
             buf[--n] = '\0';
@@ -381,8 +372,8 @@ static void pico8_stat_time(lua_State *L, int idx)
     time_t now = time(NULL);
     struct tm tmv;
     int ok;
-    if (idx >= 90) ok = (localtime_r(&now, &tmv) != NULL);
-    else           ok = (gmtime_r(&now, &tmv) != NULL);
+    if (idx >= 90) ok = util_local_time(now, &tmv);
+    else           ok = util_utc_time(now, &tmv);
     if (!ok) {
         lua_pushnumber(L, fix32_from_int(0));
         return;

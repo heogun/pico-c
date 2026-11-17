@@ -23,7 +23,10 @@ make asan                                # AddressSanitizer 빌드
 ./build/macos/pico-c -headless -frames 18000 -autoplay 1 game.p8   # 몽키 테스트(무작위 입력, 오류 탐지)
 ```
 
-- 첫 빌드 시 `make`가 z8lua를 `platforms/common/deps/z8lua`로 git clone (네트워크 필요).
+- Windows 네이티브(MSVC)는 CMake: `platforms/windows/build-msvc.bat` / `test-msvc.bat` (SDL2는 vcpkg).
+  CMake도 macOS에서 빌드된다: `cmake -S . -B build/cmake -DCMAKE_PREFIX_PATH=/opt/local`.
+- 테스트 스위트의 구현은 `tests/tools/run_tests.py` 하나다(Python 3). `test.sh`/`oracle_audio.sh`는 이것을 부른다.
+- 첫 빌드 시 `make`(또는 CMake configure)가 z8lua를 `platforms/common/deps/z8lua`로 git clone (네트워크 필요).
 - macOS SDL2는 MacPorts(`/opt/local`). amfid 문제로 **ad-hoc codesign 없이는 실행 불가** —
   Makefile이 자동 처리하지만 수동으로 바이너리를 만들면 `codesign --force --sign -` 필요.
 - 산출물은 전부 `build/<platform>/` (gitignore).
@@ -76,6 +79,9 @@ Makefile은 `src/*.cpp`와 `src/*/*.cpp`를 와일드카드로 잡으므로 **�
 - 서브시스템 경계를 지킨다: Lua 바인딩은 `src/api/<모듈>`, 카트 포맷은 `src/cart/`, 셸은 `src/shell/`.
   폴더 내부 공유는 `*_internal.h`, 외부 공개는 `src/pico8_*.h`.
 - 공용 헬퍼가 필요하면 복사하지 말고 `src/util.h`에 둔다.
+- **POSIX 전용 API를 직접 쓰지 말 것**(opendir, stat, getcwd, chdir, mkdir, popen, isatty, localtime_r 등):
+  MSVC에 없다. `util.h`의 `util_list_dir`/`util_is_dir`/`util_cwd`/`util_make_dir`/`util_popen`/
+  `util_stdin_is_terminal`/`util_local_time` 등을 쓴다. GNU 확장(복합 리터럴 등)도 피할 것.
 - 텍스트는 내부적으로 **PICO-8 charset 바이트**로 다루고, 출력/저장 경계에서만 UTF-8로 변환한다
   (`pico8_charset_from_utf8` / `pico8_charset_to_utf8`).
 - 셸 명령 추가는 `src/shell/commands.cpp`의 `kShellCommands` 표에 한 줄 추가.

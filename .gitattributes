@@ -1,0 +1,15 @@
+# Keep the text files byte for byte on every system: the test carts and the
+# golden transcripts are compared by their bytes (the source size limit
+# counts them), and platforms/common/z8lua.patch expects LF.  Windows Git
+# would otherwise check them out with CRLF.
+# 모든 시스템에서 텍스트 파일을 바이트 그대로 유지한다. 테스트 카트와 골든은
+# 바이트로 비교되고, z8lua.patch는 LF를 기대한다. 그렇지 않으면 Windows의 Git이
+# CRLF로 체크아웃한다.
+* text=auto eol=lf
+
+*.png binary
+*.wav binary
+*.dll binary
+
+# cmd.exe wants its batch files with CRLF.  cmd.exe는 배치 파일에 CRLF가 필요하다.
+*.bat text eol=crlf

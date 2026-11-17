@@ -3,14 +3,19 @@
 #
 #   test_common.sh <platform> [cart ...]
 #
-# Runs every cart in tests/carts that has a golden transcript in
-# tests/expected, in headless mode, and compares the output with the golden
-# file.  The golden transcripts were produced by the real PICO-8 (see
-# platforms/macos/oracle.sh), so this suite checks pico-c against PICO-8 on
-# every platform, not just on the machine that has PICO-8 installed.
+# Runs tests/tools/run_tests.py, the one implementation of the suite (it
+# needs Python 3 and nothing else, so it also runs on Windows without a
+# shell): every cart in tests/carts with a golden transcript runs headless
+# and is compared with it, and with no cart given the audio suite in
+# tests/audio runs as well.  The golden transcripts and the audio
+# expectations were recorded from the real PICO-8, so this checks pico-c
+# against PICO-8 on every platform.
 #
 # Environment:
 #   PICO_C_BIN   path of the pico-c binary (default build/<platform>/pico-c)
+#
+# pico-c 회귀 스위트. 스위트의 유일한 구현인 tests/tools/run_tests.py를 부른다
+# (Python 3만 있으면 되므로 셸 없는 Windows에서도 돈다).
 
 set -uo pipefail
 
@@ -25,9 +30,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 . "$SCRIPT_DIR/common.sh"
 
-CARTS_DIR="$(pc_carts_dir)"
-EXPECTED_DIR="$(pc_expected_dir)"
-
 if [ -n "${PICO_C_BIN:-}" ]; then
     BIN="$PICO_C_BIN"
 else
@@ -40,101 +42,7 @@ if [ ! -x "$BIN" ]; then
 Build it first:  make PLATFORM=$PLATFORM"
 fi
 
-# ---------------------------------------------------------------- cart list --
-# The suite is made of the carts that have a golden transcript.  A cart that
-# is named cmp_* but has no golden transcript is reported, it should have one.
-is_transfer_file() {
-    local f="$1" t
-    for t in "${PC_TRANSFER_FILES[@]}"; do
-        [ "$f" = "$t" ] && return 0
-    done
-    return 1
-}
+PY="$(command -v python3 || command -v python || true)"
+[ -n "$PY" ] || pc_die "python3 is needed to run the suite"
 
-if [ $# -gt 0 ]; then
-    CARTS=()
-    for c in "$@"; do
-        case "$c" in
-            /*) CARTS+=("$c") ;;
-            *.p8) CARTS+=("$CARTS_DIR/$c") ;;
-            *)   CARTS+=("$CARTS_DIR/$c.p8") ;;
-        esac
-    done
-else
-    CARTS=()
-    while IFS= read -r f; do
-        name="$(basename "$f")"
-        is_transfer_file "$name" && continue
-        if [ -f "$EXPECTED_DIR/$name.txt" ] || [ "${name#cmp_}" != "$name" ]; then
-            CARTS+=("$f")
-        fi
-    done < <(ls "$CARTS_DIR"/*.p8 2>/dev/null | sort)
-fi
-
-if [ ${#CARTS[@]} -eq 0 ]; then
-    pc_die "no carts found in $CARTS_DIR"
-fi
-
-# -------------------------------------------------------------------- run ----
-# A cart that writes a file another cart reads back must find it, so those
-# files are only removed once, at the beginning of the run.
-pc_clean_files "$CARTS_DIR" "${PC_TRANSFER_FILES[@]}"
-
-pass=0
-fail=0
-skip=0
-failed=()
-
-for cart in "${CARTS[@]}"; do
-    name="$(basename "$cart")"
-    golden="$EXPECTED_DIR/$name.txt"
-
-    if [ ! -f "$golden" ]; then
-        printf 'SKIP  %s (no golden file)\n' "$name"
-        skip=$((skip + 1))
-        continue
-    fi
-
-    # State left over by a previous cart would change the result.
-    pc_clean_files "$CARTS_DIR" "${PC_STATE_FILES[@]}"
-
-    tmp="$(mktemp "${TMPDIR:-/tmp}/pico-c-test.XXXXXX")"
-    # The cart is run from tests/carts so that carts reading or writing a
-    # sibling file (cstore_base.p8, loadB.p8, ...) find it.
-    ( cd "$CARTS_DIR" && "$BIN" -headless "$cart" ) > "$tmp" 2>&1
-    pc_normalize < "$tmp" | pc_apply_mask "$name" > "$tmp.norm"
-    pc_apply_mask "$name" < "$golden" > "$tmp.golden"
-
-    if diff -u "$tmp.golden" "$tmp.norm" > "$tmp.diff"; then
-        printf 'PASS  %s\n' "$name"
-        pass=$((pass + 1))
-    else
-        printf 'FAIL  %s\n' "$name"
-        fail=$((fail + 1))
-        failed+=("$name")
-        sed -n '1,40p' "$tmp.diff" | sed 's/^/      /'
-    fi
-    rm -f "$tmp" "$tmp.norm" "$tmp.golden" "$tmp.diff"
-done
-
-# The files a cart wrote for another cart are not part of the repository.
-pc_clean_files "$CARTS_DIR" "${PC_TRANSFER_FILES[@]}"
-
-# The audio suite runs with the whole suite only (not for a single cart).
-if [ $# -eq 0 ]; then
-    # shellcheck source=audio_common.sh
-    . "$SCRIPT_DIR/audio_common.sh"
-    audio_out="$(pc_audio_suite "$BIN")"
-    printf '%s\n' "$audio_out"
-    pass=$((pass + $(printf '%s\n' "$audio_out" | grep -c '^PASS')))
-    audio_fail=$(printf '%s\n' "$audio_out" | grep -c '^FAIL')
-    fail=$((fail + audio_fail))
-    [ "$audio_fail" -gt 0 ] && failed+=("audio")
-fi
-
-printf -- '---- %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
-if [ $fail -gt 0 ]; then
-    printf 'failed: %s\n' "${failed[*]}"
-    exit 1
-fi
-exit 0
+exec "$PY" "$PC_ROOT/tests/tools/run_tests.py" --bin "$BIN" "$@"

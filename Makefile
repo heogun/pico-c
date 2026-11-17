@@ -146,7 +146,7 @@ $(Z8LUA_STAMP): $(Z8LUA_PATCH) | $(BUILD_DIR)
 	    echo "       remove the directory and run make again" >&2; \
 	    exit 1; \
 	  fi; \
-	  git clone --branch pico8 https://github.com/samhocevar/z8lua.git "$(Z8LUA_DIR)" && \
+	  git -c core.autocrlf=false clone --branch pico8 https://github.com/samhocevar/z8lua.git "$(Z8LUA_DIR)" && \
 	  git -C "$(Z8LUA_DIR)" checkout -q $(Z8LUA_REV) || exit 1; \
 	else \
 	  echo "z8lua already present in $(Z8LUA_DIR)"; \

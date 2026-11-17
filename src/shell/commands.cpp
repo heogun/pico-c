@@ -21,9 +21,6 @@
 #include <vector>
 #include <algorithm>
 
-#include <dirent.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "pico8.h"
 #include "util.h"
@@ -131,24 +128,17 @@ static void cmd_help_topic(const std::string &topic)
 static void cmd_dir(const std::string &arg, const std::string &)
 {
     std::string dir = arg.empty() ? "." : arg;
-    DIR *d = opendir(dir.c_str());
-    if (!d) {
+    std::vector<UtilDirEntry> entries;
+    if (!util_list_dir(dir, entries)) {
         shell_print_error("dir: cannot open " + dir);
         return;
     }
 
     std::vector<std::string> names;
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-        std::string n = ent->d_name;
-        struct stat st;
-        std::string full = dir + "/" + n;
-        bool is_dir = (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode));
-        if (is_dir) names.push_back(n + "/");
-        else if (shell_is_cart_name(n)) names.push_back(n);
+    for (const UtilDirEntry &e : entries) {
+        if (e.is_dir) names.push_back(e.name + "/");
+        else if (shell_is_cart_name(e.name)) names.push_back(e.name);
     }
-    closedir(d);
 
     std::sort(names.begin(), names.end());
     if (names.empty()) {
@@ -177,11 +167,10 @@ static void cmd_dir(const std::string &arg, const std::string &)
 static void cmd_cd(const std::string &arg, const std::string &)
 {
     if (arg.empty()) {
-        char buf[1024];
-        if (getcwd(buf, sizeof(buf))) shell_print(buf, COL_TEXT);
+        shell_print(util_cwd(), COL_TEXT);
         return;
     }
-    if (chdir(arg.c_str()) != 0) {
+    if (!util_chdir(arg)) {
         shell_print_error("cd: no such folder: " + arg);
         return;
     }
@@ -367,13 +356,12 @@ void pico8_console_open_folder(void)
 static void cmd_folder(const std::string &arg, const std::string &)
 {
     std::string loc = util_lower(arg);
-    char buf[1024];
 
     if (loc.empty()) {
-        shell_print(getcwd(buf, sizeof(buf)) ? buf : ".", COL_TEXT);
+        shell_print(util_cwd(), COL_TEXT);
         shell_open_in_file_manager(".");
     } else if (loc == "backups") {
-        system("mkdir -p backup");
+        util_make_dir("backup", true);
         shell_print("backups", COL_TEXT);
         shell_open_in_file_manager("backup");
     } else if (loc == "desktop") {
@@ -382,7 +370,7 @@ static void cmd_folder(const std::string &arg, const std::string &)
         shell_print(desk, COL_TEXT);
         shell_open_in_file_manager(desk);
     } else if (loc == "config" || loc == "bbs") {
-        shell_print(getcwd(buf, sizeof(buf)) ? buf : ".", COL_TEXT);
+        shell_print(util_cwd(), COL_TEXT);
         shell_open_in_file_manager(".");
     } else {
         shell_print_error("usage: folder [backups config bbs desktop]");
@@ -433,7 +421,7 @@ static void cmd_menu(const std::string &arg, const std::string &)
 static void cmd_mkdir(const std::string &arg, const std::string &)
 {
     if (arg.empty()) { shell_print_error("usage: mkdir <name>"); return; }
-    if (mkdir(arg.c_str(), 0777) != 0)
+    if (!util_make_dir(arg, false))
         shell_print_error("mkdir: cannot create " + arg);
     else
         shell_print_info("created " + arg + "/");
@@ -453,7 +441,7 @@ static void cmd_backup(const std::string &, const std::string &)
     if (!g_has_cart) { shell_print_error("backup: no cartridge loaded"); return; }
     if (g_source.empty()) { shell_print_error("backup: no editable source"); return; }
 
-    system("mkdir -p backup");
+    util_make_dir("backup", true);
     std::string out = "backup/" + g_cart_name;
     if (!util_has_suffix(out, ".p8")) out += ".p8";
 
