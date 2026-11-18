@@ -106,3 +106,15 @@ platforms/macos/oracle.sh            # compare every cart
 platforms/macos/oracle.sh --record   # refresh tests/expected/
 platforms/macos/oracle_audio.sh      # the audio suite against PICO-8
 ```
+
+On Windows, with PICO-8 installed (`PICO8` overrides where `pico8.exe` is):
+
+```bat
+platforms\windows\oracle.bat
+platforms\windows\oracle.bat --record
+```
+
+Windows PICO-8 buffers its stdout when it is a pipe, so a cart that writes
+to both stdout and stderr (`cmp_serial.p8`) can come back with the same
+lines in another order.  The script reports that as `ORDER`, not as a
+difference, and `--record` leaves the golden file of such a cart alone.
