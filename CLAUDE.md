@@ -24,6 +24,7 @@ make asan                                # AddressSanitizer 빌드
 ```
 
 - Windows 네이티브(MSVC)는 CMake: `platforms/windows/build-msvc.bat` / `test-msvc.bat` (SDL2는 vcpkg).
+  Windows에 설치된 PICO-8과의 비교는 `platforms/windows/oracle.bat [--record] [cart ...]`(Python 3).
   CMake도 macOS에서 빌드된다: `cmake -S . -B build/cmake -DCMAKE_PREFIX_PATH=/opt/local`.
 - 테스트 스위트의 구현은 `tests/tools/run_tests.py` 하나다(Python 3). `test.sh`/`oracle_audio.sh`는 이것을 부른다.
 - 첫 빌드 시 `make`(또는 CMake configure)가 z8lua를 `platforms/common/deps/z8lua`로 git clone (네트워크 필요).

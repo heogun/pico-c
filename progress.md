@@ -743,3 +743,17 @@ bit0 편집 모드(소리 무관), bit1 noiz, bit2 buzz, detune = (b/8)%3, rever
   테스트와 z8lua 패치를 깨기 때문. z8lua 클론은 `-c core.autocrlf=false`.
 - **스크립트/CI**: `platforms/windows/build-msvc.bat`, `test-msvc.bat`, CI `windows-msvc` 작업
   (vcpkg `sdl2:x64-windows` → CMake → `run_tests.py`).
+
+---
+
+## 13. Windows 오라클 (2026-11-18)
+
+- `platforms/windows/oracle.py`(+ `oracle.bat`): Windows에 설치된 PICO-8 0.2.7로 `oracle.sh`와 같은 비교.
+  정규화/마스크는 `run_tests.py` 것을 그대로 쓴다. PICO-8은 `-home <임시 폴더>`로 돌리고 끝나면 지운다
+  (사용자 config/카트 보호). `import_grad.png`는 그 임시 카트 폴더에 복사.
+- **Windows PICO-8 실측 규칙** (macOS와 다름):
+  - `-x`에서 `printh`는 stderr에 `INFO: ` 접두어로, 오류·serial 출력·`RUNNING:`은 stdout으로 나온다.
+  - 파이프로 받으면 stdout이 버퍼링되어 stderr보다 늦게 나온다(자기 `RUNNING:` 줄조차 카트의 첫 `printh`
+    뒤에). 그래서 두 스트림을 한 파이프로 받고, 같은 줄이 순서만 다르면 `ORDER`(차이 아님)로 본다.
+    `--record`는 `ORDER` 카트의 골든을 건드리지 않는다(원래 순서를 알 수 없음).
+- 결과: 52 MATCH + 2 KNOWN + 1 ORDER(`cmp_serial`), DIFF 0. macOS에서 기록한 골든과도 모두 같다.

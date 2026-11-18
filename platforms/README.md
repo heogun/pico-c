@@ -19,6 +19,7 @@ platforms/
 | `build.sh` / `build.bat` | build pico-c, the binary lands in `build/<platform>/` |
 | `test.sh` / `test.bat` | run the regression suite of `tests/` |
 | `oracle.sh` (macOS only) | compare pico-c with the real PICO-8 and refresh the golden transcripts |
+| `windows/oracle.py` / `oracle.bat` | the same against the PICO-8 installed on Windows (Python 3) |
 
 The `.bat` files are the Windows entry points; they need the MSYS2 tools
 (`make`, `bash`).  The `.sh` files work on every POSIX shell.  On macOS and

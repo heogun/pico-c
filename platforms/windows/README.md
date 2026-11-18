@@ -60,3 +60,21 @@ platforms/windows/test.sh       # or test.bat from a plain cmd.exe
 The batch files need the MSYS2 tools (`make`, `bash`) on the `PATH`; they
 look for them in `C:\msys64\usr\bin` and add `C:\msys64\mingw64\bin` (where
 the MinGW compiler lives) to the `PATH` as well.
+
+## Compare with PICO-8
+
+With PICO-8 installed, the transcripts can be checked against it, like
+`platforms/macos/oracle.sh` does on macOS:
+
+```bat
+platforms\windows\oracle.bat              & rem every cmp_*.p8 cart
+platforms\windows\oracle.bat cmp_all.p8   & rem some carts
+platforms\windows\oracle.bat --record     & rem rewrite tests\expected
+```
+
+It needs Python 3 and any pico-c build (`--bin` picks one).  PICO-8 is taken
+from `C:\Program Files (x86)\PICO-8\pico8.exe` (set `PICO8` to change it) and
+runs with `-home` in a temporary folder, so its own config and carts are not
+touched.  Windows PICO-8 buffers its stdout when it is a pipe, so lines a
+cart writes to stdout (serial output, errors) can come out after later
+`printh` lines; such a cart is reported as `ORDER` instead of a difference.
